@@ -119,10 +119,16 @@ def _run_full_watchlist() -> None:
 
     logger.info("=== Starting scheduled optimization run ===")
 
-    from app.database import SessionLocal
+    from app.database import get_session_factory
     from app.models import OptimizationRun
 
-    db = SessionLocal()
+    try:
+        factory = get_session_factory()
+        db = factory()
+    except Exception as exc:
+        logger.error("Cannot create DB session for scheduled run: %s", exc)
+        return
+
     run_record = OptimizationRun(started_at=_last_run, status="running")
     try:
         db.add(run_record)
@@ -157,32 +163,39 @@ def _run_full_watchlist() -> None:
 
 def start_scheduler() -> None:
     """Start the APScheduler background scheduler."""
-    from apscheduler.schedulers.background import BackgroundScheduler
-    from apscheduler.triggers.interval import IntervalTrigger
-
     global _scheduler, _next_run
 
-    _scheduler = BackgroundScheduler()
-    _scheduler.add_job(
-        _run_full_watchlist,
-        trigger=IntervalTrigger(hours=OPTIMIZATION_INTERVAL_HOURS),
-        id="full_watchlist_optimization",
-        replace_existing=True,
-    )
-    _scheduler.start()
-    _next_run = datetime.now(timezone.utc) + timedelta(hours=OPTIMIZATION_INTERVAL_HOURS)
-    logger.info(
-        "Scheduler started — runs every %d hours. Next run: %s",
-        OPTIMIZATION_INTERVAL_HOURS, _next_run.isoformat()
-    )
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        from apscheduler.triggers.interval import IntervalTrigger
+
+        _scheduler = BackgroundScheduler()
+        _scheduler.add_job(
+            _run_full_watchlist,
+            trigger=IntervalTrigger(hours=OPTIMIZATION_INTERVAL_HOURS),
+            id="full_watchlist_optimization",
+            replace_existing=True,
+        )
+        _scheduler.start()
+        _next_run = datetime.now(timezone.utc) + timedelta(hours=OPTIMIZATION_INTERVAL_HOURS)
+        logger.info(
+            "Scheduler started — runs every %d hours. Next run: %s",
+            OPTIMIZATION_INTERVAL_HOURS, _next_run.isoformat()
+        )
+    except Exception as exc:
+        logger.error("Failed to start scheduler: %s", exc)
 
 
 def stop_scheduler() -> None:
     """Gracefully shut down the scheduler."""
     global _scheduler
-    if _scheduler and _scheduler.running:
-        _scheduler.shutdown(wait=False)
-        logger.info("Scheduler stopped.")
+    if _scheduler:
+        try:
+            if _scheduler.running:
+                _scheduler.shutdown(wait=False)
+                logger.info("Scheduler stopped.")
+        except Exception as exc:
+            logger.error("Error stopping scheduler: %s", exc)
 
 
 def get_scheduler_status() -> dict:

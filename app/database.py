@@ -1,7 +1,5 @@
 import logging
 from typing import Optional
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +14,7 @@ def _get_database_url():
 def get_engine():
     global _engine
     if _engine is None:
+        from sqlalchemy import create_engine
         db_url = _get_database_url()
         _engine = create_engine(
             db_url,
@@ -29,6 +28,7 @@ def get_engine():
 def get_session_factory():
     global _session_factory
     if _session_factory is None:
+        from sqlalchemy.orm import sessionmaker
         _session_factory = sessionmaker(autocommit=False, autoflush=False, bind=get_engine())
     return _session_factory
 
@@ -56,7 +56,7 @@ def is_db_available() -> bool:
 
 def get_db():
     factory = get_session_factory()
-    db: Session = factory()
+    db = factory()
     try:
         yield db
     finally:

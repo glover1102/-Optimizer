@@ -12,25 +12,23 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.interval import IntervalTrigger
-
 from app.config import OPTIMIZATION_INTERVAL_HOURS, WATCHLIST, TIMEFRAMES, DEFAULT_TRIALS
-from app.data_fetcher import get_numpy_arrays
-from app.optimizer import run_optimization
-from app.walk_forward import run_walk_forward
-from app.regime_detector import detect_regime
-from app.scorer import score_result
 
 logger = logging.getLogger(__name__)
 
-_scheduler: Optional[BackgroundScheduler] = None
+_scheduler = None
 _last_run: Optional[datetime] = None
 _next_run: Optional[datetime] = None
 
 
 def _optimize_symbol(symbol: str, timeframe: str, db_session) -> None:
     """Run full optimization pipeline for a single symbol/timeframe pair."""
+    from app.data_fetcher import get_numpy_arrays
+    from app.optimizer import run_optimization
+    from app.walk_forward import run_walk_forward
+    from app.regime_detector import detect_regime
+    from app.scorer import score_result
+
     logger.info("Optimizing %s %s …", symbol, timeframe)
 
     arrays = get_numpy_arrays(symbol, timeframe)
@@ -159,6 +157,9 @@ def _run_full_watchlist() -> None:
 
 def start_scheduler() -> None:
     """Start the APScheduler background scheduler."""
+    from apscheduler.schedulers.background import BackgroundScheduler
+    from apscheduler.triggers.interval import IntervalTrigger
+
     global _scheduler, _next_run
 
     _scheduler = BackgroundScheduler()

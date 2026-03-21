@@ -17,7 +17,7 @@ import logging
 import threading
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,9 +27,9 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.config import WATCHLIST
-from app.database import get_db, init_db
-from app.models import OptimizationResult
-from app.scheduler import start_scheduler, stop_scheduler, get_scheduler_status
+
+if TYPE_CHECKING:
+    from app.models import OptimizationResult
 
 logger = logging.getLogger(__name__)
 
@@ -40,16 +40,19 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     try:
+        from app.database import init_db
         init_db()
     except Exception as exc:
         logger.error("Database init failed: %s — app will start without DB", exc)
     try:
+        from app.scheduler import start_scheduler
         start_scheduler()
     except Exception as exc:
         logger.error("Scheduler start failed: %s", exc)
     logger.info("QTAlgo Optimizer started.")
     yield
     try:
+        from app.scheduler import stop_scheduler
         stop_scheduler()
     except Exception as exc:
         logger.error("Scheduler stop failed: %s", exc)
@@ -88,7 +91,7 @@ def _asset_class(symbol: str) -> str:
     return _ASSET_CLASS_MAP.get(symbol, "other")
 
 
-def _result_to_dict(r: OptimizationResult) -> dict[str, Any]:
+def _result_to_dict(r: "OptimizationResult") -> dict[str, Any]:
     return {
         "id": r.id,
         "symbol": r.symbol,
@@ -117,12 +120,23 @@ def _result_to_dict(r: OptimizationResult) -> dict[str, Any]:
 # ── HTML routes ───────────────────────────────────────────────────────────────
 
 
+def get_db():
+    from app.database import get_session_factory
+    factory = get_session_factory()
+    db = factory()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(
     request: Request,
     asset_class: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
+    from app.models import OptimizationResult
     query = db.query(OptimizationResult).filter(OptimizationResult.is_current == True)
     if asset_class:
         symbols = WATCHLIST.get(asset_class, [])
@@ -136,7 +150,11 @@ async def dashboard(
         obj.asset_class = _asset_class(r.symbol)
         enriched.append(obj)
 
-    status = get_scheduler_status()
+    try:
+        from app.scheduler import get_scheduler_status
+        status = get_scheduler_status()
+    except Exception:
+        status = {"last_run": None, "next_run": None, "running": False}
     return templates.TemplateResponse(
         "dashboard.html",
         {
@@ -156,6 +174,7 @@ async def detail(
     timeframe: str,
     db: Session = Depends(get_db),
 ):
+    from app.models import OptimizationResult
     result = (
         db.query(OptimizationResult)
         .filter(
@@ -187,6 +206,7 @@ async def detail(
 
 @app.get("/api/results")
 async def api_results(db: Session = Depends(get_db)):
+    from app.models import OptimizationResult
     results = (
         db.query(OptimizationResult)
         .filter(OptimizationResult.is_current == True)
@@ -198,6 +218,7 @@ async def api_results(db: Session = Depends(get_db)):
 
 @app.get("/api/results/{symbol}/{timeframe}")
 async def api_result_detail(symbol: str, timeframe: str, db: Session = Depends(get_db)):
+    from app.models import OptimizationResult
     result = (
         db.query(OptimizationResult)
         .filter(
@@ -265,6 +286,7 @@ async def webhook_tradingview(payload: TVWebhookPayload):
 @app.get("/api/health")
 async def health():
     try:
+        from app.scheduler import get_scheduler_status
         status = get_scheduler_status()
     except Exception as exc:
         logger.warning("Could not retrieve scheduler status: %s", exc)

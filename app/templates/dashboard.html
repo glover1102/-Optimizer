@@ -123,13 +123,25 @@
 
 <script>
 function runAllOptimizations() {
+    var code = prompt('Enter optimization code:');
+    if (!code) return;
+
     var btn = document.getElementById('btn-run-all');
     var status = document.getElementById('run-all-status');
     btn.disabled = true;
     btn.textContent = '⏳ Running...';
     status.textContent = '';
-    fetch('/api/optimize/all', { method: 'POST' })
-        .then(function(r) { return r.json(); })
+    fetch('/api/optimize/all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: code })
+    })
+        .then(function(r) {
+            if (r.status === 403) {
+                throw new Error('Invalid code');
+            }
+            return r.json();
+        })
         .then(function(data) {
             status.style.color = 'var(--green)';
             status.textContent = data.message || 'Started!';
@@ -139,24 +151,32 @@ function runAllOptimizations() {
                 status.textContent = '';
             }, 5000);
         })
-        .catch(function() {
+        .catch(function(err) {
             status.style.color = 'var(--red)';
-            status.textContent = 'Failed to start optimization. Please try again.';
+            status.textContent = err.message === 'Invalid code' ? '❌ Invalid code.' : 'Failed to start optimization.';
             btn.disabled = false;
             btn.textContent = '⚡ Run Full Optimization';
         });
 }
 
 function optimizeSymbol(symbol, timeframe, btn) {
+    var code = prompt('Enter optimization code:');
+    if (!code) return;
+
     var orig = btn.textContent;
     btn.disabled = true;
     btn.textContent = '⏳';
     fetch('/api/optimize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbol: symbol, timeframe: timeframe })
+        body: JSON.stringify({ symbol: symbol, timeframe: timeframe, code: code })
     })
-        .then(function(r) { return r.json(); })
+        .then(function(r) {
+            if (r.status === 403) {
+                throw new Error('Invalid code');
+            }
+            return r.json();
+        })
         .then(function() {
             btn.textContent = '✓ Started';
             btn.style.color = 'var(--green)';
@@ -166,11 +186,12 @@ function optimizeSymbol(symbol, timeframe, btn) {
                 btn.style.color = '';
             }, 4000);
         })
-        .catch(function() {
+        .catch(function(err) {
             btn.disabled = false;
             btn.textContent = orig;
             btn.style.color = 'var(--red)';
-            setTimeout(function() { btn.style.color = ''; }, 3000);
+            btn.title = err.message === 'Invalid code' ? 'Invalid code' : 'Failed';
+            setTimeout(function() { btn.style.color = ''; btn.title = ''; }, 3000);
         });
 }
 </script>

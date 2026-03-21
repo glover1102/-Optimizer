@@ -72,11 +72,28 @@ def _fetch_yfinance(symbol: str, timeframe: str) -> Optional[pd.DataFrame]:
         yf_tf = _YFINANCE_TF_MAP.get(timeframe, "1d")
         period = _yf_period_for_tf(timeframe)
 
+        time.sleep(0.5)  # Be nice to yfinance API
+
         ticker = yf.Ticker(symbol)
         df = ticker.history(period=period, interval=yf_tf, auto_adjust=True)
 
         if df.empty:
-            logger.warning("yfinance returned empty data for %s %s", symbol, timeframe)
+            logger.warning(
+                "yfinance returned empty data for %s %s (period=%s); trying date-range fallback",
+                symbol, timeframe, period,
+            )
+            # Known yfinance workaround: explicit start/end can succeed when period does not
+            end = datetime.now()
+            if timeframe in ("5m", "15m"):
+                start = end - timedelta(days=59)
+            elif timeframe in ("1h", "4h"):
+                start = end - timedelta(days=729)
+            else:
+                start = end - timedelta(days=365 * 5)
+            df = ticker.history(start=start, end=end, interval=yf_tf, auto_adjust=True)
+
+        if df.empty:
+            logger.warning("yfinance returned empty data for %s %s (both period and date-range)", symbol, timeframe)
             return None
 
         df = df.rename(columns={"Open": "open", "High": "high", "Low": "low", "Close": "close", "Volume": "volume"})

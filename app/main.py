@@ -286,11 +286,15 @@ class OptimizeRequest(BaseModel):
     timeframe: str
     trials: int = 100
     objective: str = "risk_adjusted"
+    code: str = ""
 
 
 @app.post("/api/optimize")
 async def api_optimize(req: OptimizeRequest):
     """Trigger a manual optimization for a single symbol/timeframe."""
+    from app.config import OPTIMIZE_PASSCODE
+    if req.code != OPTIMIZE_PASSCODE:
+        raise HTTPException(status_code=403, detail="Invalid optimization code")
 
     def _run():
         from app.scheduler import _optimize_symbol
@@ -317,9 +321,16 @@ async def api_optimize(req: OptimizeRequest):
     }
 
 
+class OptimizeAllRequest(BaseModel):
+    code: str
+
+
 @app.post("/api/optimize/all")
-async def api_optimize_all():
+async def api_optimize_all(req: OptimizeAllRequest):
     """Trigger optimization for all symbols/timeframes in the watchlist."""
+    from app.config import OPTIMIZE_PASSCODE
+    if req.code != OPTIMIZE_PASSCODE:
+        raise HTTPException(status_code=403, detail="Invalid optimization code")
 
     def _run():
         from app.scheduler import _run_full_watchlist  # deferred — consistent with app import pattern

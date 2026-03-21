@@ -12,25 +12,24 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.interval import IntervalTrigger
-
 from app.config import OPTIMIZATION_INTERVAL_HOURS, WATCHLIST, TIMEFRAMES, DEFAULT_TRIALS
-from app.data_fetcher import get_numpy_arrays
-from app.optimizer import run_optimization
-from app.walk_forward import run_walk_forward
-from app.regime_detector import detect_regime
-from app.scorer import score_result
 
 logger = logging.getLogger(__name__)
 
-_scheduler: Optional[BackgroundScheduler] = None
+_scheduler: Optional[object] = None
 _last_run: Optional[datetime] = None
 _next_run: Optional[datetime] = None
 
 
 def _optimize_symbol(symbol: str, timeframe: str, db_session) -> None:
     """Run full optimization pipeline for a single symbol/timeframe pair."""
+    # Import heavy modules lazily so scheduler.py can be imported without triggering them
+    from app.data_fetcher import get_numpy_arrays
+    from app.optimizer import run_optimization
+    from app.walk_forward import run_walk_forward
+    from app.regime_detector import detect_regime
+    from app.scorer import score_result
+
     logger.info("Optimizing %s %s …", symbol, timeframe)
 
     arrays = get_numpy_arrays(symbol, timeframe)
@@ -121,10 +120,16 @@ def _run_full_watchlist() -> None:
 
     logger.info("=== Starting scheduled optimization run ===")
 
-    from app.database import SessionLocal
+    from app.database import get_session_factory
     from app.models import OptimizationRun
 
-    db = SessionLocal()
+    try:
+        factory = get_session_factory()
+        db = factory()
+    except Exception as exc:
+        logger.error("Cannot create DB session for scheduled run: %s", exc)
+        return
+
     run_record = OptimizationRun(started_at=_last_run, status="running")
     try:
         db.add(run_record)
@@ -161,32 +166,42 @@ def start_scheduler() -> None:
     """Start the APScheduler background scheduler."""
     global _scheduler, _next_run
 
-    _scheduler = BackgroundScheduler()
-    _scheduler.add_job(
-        _run_full_watchlist,
-        trigger=IntervalTrigger(hours=OPTIMIZATION_INTERVAL_HOURS),
-        id="full_watchlist_optimization",
-        replace_existing=True,
-    )
-    _scheduler.start()
-    _next_run = datetime.now(timezone.utc) + timedelta(hours=OPTIMIZATION_INTERVAL_HOURS)
-    logger.info(
-        "Scheduler started — runs every %d hours. Next run: %s",
-        OPTIMIZATION_INTERVAL_HOURS, _next_run.isoformat()
-    )
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        from apscheduler.triggers.interval import IntervalTrigger
+
+        _scheduler = BackgroundScheduler()
+        _scheduler.add_job(
+            _run_full_watchlist,
+            trigger=IntervalTrigger(hours=OPTIMIZATION_INTERVAL_HOURS),
+            id="full_watchlist_optimization",
+            replace_existing=True,
+        )
+        _scheduler.start()
+        _next_run = datetime.now(timezone.utc) + timedelta(hours=OPTIMIZATION_INTERVAL_HOURS)
+        logger.info(
+            "Scheduler started — runs every %d hours. Next run: %s",
+            OPTIMIZATION_INTERVAL_HOURS, _next_run.isoformat()
+        )
+    except Exception as exc:
+        logger.error("Failed to start scheduler: %s", exc)
 
 
 def stop_scheduler() -> None:
     """Gracefully shut down the scheduler."""
     global _scheduler
-    if _scheduler and _scheduler.running:
-        _scheduler.shutdown(wait=False)
-        logger.info("Scheduler stopped.")
+    if _scheduler:
+        try:
+            if hasattr(_scheduler, 'running') and _scheduler.running:
+                _scheduler.shutdown(wait=False)
+                logger.info("Scheduler stopped.")
+        except Exception as exc:
+            logger.error("Error stopping scheduler: %s", exc)
 
 
 def get_scheduler_status() -> dict:
     return {
         "last_run": _last_run.isoformat() if _last_run else None,
         "next_run": _next_run.isoformat() if _next_run else None,
-        "running": bool(_scheduler and _scheduler.running),
+        "running": bool(_scheduler and hasattr(_scheduler, 'running') and _scheduler.running),
     }

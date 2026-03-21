@@ -19,17 +19,13 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from fastapi import FastAPI, Depends, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
 
 from app.config import WATCHLIST
-from app.database import get_db, init_db
-from app.models import OptimizationResult
-from app.scheduler import start_scheduler, stop_scheduler, get_scheduler_status
 
 logger = logging.getLogger(__name__)
 
@@ -39,17 +35,28 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logger.info("QTAlgo Optimizer starting...")
+
+    # Initialize database (non-fatal)
     try:
+        from app.database import init_db
         init_db()
     except Exception as exc:
         logger.error("Database init failed: %s — app will start without DB", exc)
+
+    # Start scheduler (non-fatal)
     try:
+        from app.scheduler import start_scheduler
         start_scheduler()
     except Exception as exc:
         logger.error("Scheduler start failed: %s", exc)
+
     logger.info("QTAlgo Optimizer started.")
     yield
+
+    # Shutdown
     try:
+        from app.scheduler import stop_scheduler
         stop_scheduler()
     except Exception as exc:
         logger.error("Scheduler stop failed: %s", exc)
@@ -88,7 +95,7 @@ def _asset_class(symbol: str) -> str:
     return _ASSET_CLASS_MAP.get(symbol, "other")
 
 
-def _result_to_dict(r: OptimizationResult) -> dict[str, Any]:
+def _result_to_dict(r) -> dict[str, Any]:
     return {
         "id": r.id,
         "symbol": r.symbol,
@@ -121,32 +128,65 @@ def _result_to_dict(r: OptimizationResult) -> dict[str, Any]:
 async def dashboard(
     request: Request,
     asset_class: Optional[str] = None,
-    db: Session = Depends(get_db),
 ):
-    query = db.query(OptimizationResult).filter(OptimizationResult.is_current == True)
-    if asset_class:
-        symbols = WATCHLIST.get(asset_class, [])
-        query = query.filter(OptimizationResult.symbol.in_(symbols))
+    try:
+        from app.database import get_db, is_db_available
+        from app.models import OptimizationResult
 
-    results = query.order_by(OptimizationResult.confidence_score.desc()).all()
-    enriched = []
-    for r in results:
-        obj = type("R", (), _result_to_dict(r))()
-        obj.optimized_at = r.optimized_at
-        obj.asset_class = _asset_class(r.symbol)
-        enriched.append(obj)
+        if not is_db_available():
+            return templates.TemplateResponse(
+                "dashboard.html",
+                {
+                    "request": request,
+                    "results": [],
+                    "selected_class": asset_class,
+                    "last_run": None,
+                    "next_run": None,
+                },
+            )
 
-    status = get_scheduler_status()
-    return templates.TemplateResponse(
-        "dashboard.html",
-        {
-            "request": request,
-            "results": enriched,
-            "selected_class": asset_class,
-            "last_run": status["last_run"],
-            "next_run": status["next_run"],
-        },
-    )
+        db_gen = get_db()
+        db = next(db_gen)
+        try:
+            query = db.query(OptimizationResult).filter(OptimizationResult.is_current == True)
+            if asset_class:
+                symbols = WATCHLIST.get(asset_class, [])
+                query = query.filter(OptimizationResult.symbol.in_(symbols))
+
+            results = query.order_by(OptimizationResult.confidence_score.desc()).all()
+            enriched = []
+            for r in results:
+                obj = type("R", (), _result_to_dict(r))()
+                obj.optimized_at = r.optimized_at
+                obj.asset_class = _asset_class(r.symbol)
+                enriched.append(obj)
+        finally:
+            db_gen.close()
+
+        from app.scheduler import get_scheduler_status
+        status = get_scheduler_status()
+        return templates.TemplateResponse(
+            "dashboard.html",
+            {
+                "request": request,
+                "results": enriched,
+                "selected_class": asset_class,
+                "last_run": status["last_run"],
+                "next_run": status["next_run"],
+            },
+        )
+    except Exception as exc:
+        logger.error("Dashboard error: %s", exc)
+        return templates.TemplateResponse(
+            "dashboard.html",
+            {
+                "request": request,
+                "results": [],
+                "selected_class": asset_class,
+                "last_run": None,
+                "next_run": None,
+            },
+        )
 
 
 @app.get("/results/{symbol}/{timeframe}", response_class=HTMLResponse)
@@ -154,21 +194,29 @@ async def detail(
     request: Request,
     symbol: str,
     timeframe: str,
-    db: Session = Depends(get_db),
 ):
-    result = (
-        db.query(OptimizationResult)
-        .filter(
-            OptimizationResult.symbol == symbol,
-            OptimizationResult.timeframe == timeframe,
-            OptimizationResult.is_current == True,
-        )
-        .first()
-    )
+    try:
+        from app.database import get_db
+        from app.models import OptimizationResult
 
-    wf_windows = None
-    if result:
-        result.asset_class = _asset_class(result.symbol)
+        db_gen = get_db()
+        db = next(db_gen)
+        try:
+            result = (
+                db.query(OptimizationResult)
+                .filter(
+                    OptimizationResult.symbol == symbol,
+                    OptimizationResult.timeframe == timeframe,
+                    OptimizationResult.is_current == True,
+                )
+                .first()
+            )
+            if result:
+                result.asset_class = _asset_class(result.symbol)
+        finally:
+            db_gen.close()
+    except Exception:
+        result = None
 
     return templates.TemplateResponse(
         "detail.html",
@@ -177,7 +225,7 @@ async def detail(
             "result": result,
             "symbol": symbol,
             "timeframe": timeframe,
-            "wf_windows": wf_windows,
+            "wf_windows": None,
         },
     )
 
@@ -186,30 +234,55 @@ async def detail(
 
 
 @app.get("/api/results")
-async def api_results(db: Session = Depends(get_db)):
-    results = (
-        db.query(OptimizationResult)
-        .filter(OptimizationResult.is_current == True)
-        .order_by(OptimizationResult.confidence_score.desc())
-        .all()
-    )
-    return [_result_to_dict(r) for r in results]
+async def api_results():
+    try:
+        from app.database import get_db
+        from app.models import OptimizationResult
+
+        db_gen = get_db()
+        db = next(db_gen)
+        try:
+            results = (
+                db.query(OptimizationResult)
+                .filter(OptimizationResult.is_current == True)
+                .order_by(OptimizationResult.confidence_score.desc())
+                .all()
+            )
+            return [_result_to_dict(r) for r in results]
+        finally:
+            db_gen.close()
+    except Exception as exc:
+        logger.error("API results error: %s", exc)
+        return []
 
 
 @app.get("/api/results/{symbol}/{timeframe}")
-async def api_result_detail(symbol: str, timeframe: str, db: Session = Depends(get_db)):
-    result = (
-        db.query(OptimizationResult)
-        .filter(
-            OptimizationResult.symbol == symbol,
-            OptimizationResult.timeframe == timeframe,
-            OptimizationResult.is_current == True,
-        )
-        .first()
-    )
-    if not result:
-        raise HTTPException(status_code=404, detail=f"No result for {symbol} {timeframe}")
-    return _result_to_dict(result)
+async def api_result_detail(symbol: str, timeframe: str):
+    try:
+        from app.database import get_db
+        from app.models import OptimizationResult
+
+        db_gen = get_db()
+        db = next(db_gen)
+        try:
+            result = (
+                db.query(OptimizationResult)
+                .filter(
+                    OptimizationResult.symbol == symbol,
+                    OptimizationResult.timeframe == timeframe,
+                    OptimizationResult.is_current == True,
+                )
+                .first()
+            )
+            if not result:
+                raise HTTPException(status_code=404, detail=f"No result for {symbol} {timeframe}")
+            return _result_to_dict(result)
+        finally:
+            db_gen.close()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 class OptimizeRequest(BaseModel):
@@ -220,17 +293,21 @@ class OptimizeRequest(BaseModel):
 
 
 @app.post("/api/optimize")
-async def api_optimize(req: OptimizeRequest, db: Session = Depends(get_db)):
+async def api_optimize(req: OptimizeRequest):
     """Trigger a manual optimization for a single symbol/timeframe."""
 
     def _run():
         from app.scheduler import _optimize_symbol
-        from app.database import SessionLocal
-        session = SessionLocal()
+        from app.database import get_session_factory
         try:
-            _optimize_symbol(req.symbol, req.timeframe, session)
-        finally:
-            session.close()
+            factory = get_session_factory()
+            session = factory()
+            try:
+                _optimize_symbol(req.symbol, req.timeframe, session)
+            finally:
+                session.close()
+        except Exception as exc:
+            logger.error("Manual optimization failed: %s", exc)
 
     thread = threading.Thread(target=_run, daemon=True)
     thread.start()
@@ -264,15 +341,16 @@ async def webhook_tradingview(payload: TVWebhookPayload):
 
 @app.get("/api/health")
 async def health():
+    """Health check — must ALWAYS return 200, no matter what."""
     try:
+        from app.scheduler import get_scheduler_status
         status = get_scheduler_status()
-    except Exception as exc:
-        logger.warning("Could not retrieve scheduler status: %s", exc)
+    except Exception:
         status = {"last_run": None, "next_run": None, "running": False}
     return {
         "status": "ok",
-        "last_run": status["last_run"],
-        "next_run": status["next_run"],
-        "scheduler_running": status["running"],
+        "last_run": status.get("last_run"),
+        "next_run": status.get("next_run"),
+        "scheduler_running": status.get("running", False),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }

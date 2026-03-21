@@ -21,6 +21,11 @@
     </div>
 </div>
 
+<div style="margin-bottom: 20px; display: flex; align-items: center; gap: 12px;">
+    <button id="btn-run-all" class="btn btn-primary" onclick="runAllOptimizations()">⚡ Run Full Optimization</button>
+    <span id="run-all-status" style="font-size: 13px; color: var(--muted);"></span>
+</div>
+
 {% set top_results = results | selectattr('confidence_grade', 'in', ['A', 'B']) | list %}
 {% if top_results %}
 <div class="card">
@@ -31,7 +36,7 @@
                 <th>Symbol</th><th>TF</th><th>Class</th>
                 <th>LB / RB</th><th>Offset</th><th>Mult</th><th>ATR Per</th>
                 <th>Win%</th><th>TP2%</th><th>SL%</th>
-                <th>Score</th><th>Grade</th><th>Regime</th>
+                <th>Score</th><th>Grade</th><th>Regime</th><th></th>
             </tr>
         </thead>
         <tbody>
@@ -50,6 +55,7 @@
                 <td>{{ "%.1f" | format(r.confidence_score) }}</td>
                 <td><span class="grade grade-{{ r.confidence_grade }}">{{ r.confidence_grade }}</span></td>
                 <td><span class="regime-{{ r.regime }}">{{ r.regime }}</span></td>
+                <td><button class="btn" style="font-size:11px; padding:3px 8px;" onclick="optimizeSymbol('{{ r.symbol }}', '{{ r.timeframe }}', this)">Optimize</button></td>
             </tr>
             {% endfor %}
         </tbody>
@@ -77,7 +83,7 @@
                 <th>LB / RB</th><th>Offset</th><th>Mult</th><th>ATR Per</th>
                 <th>Signals</th><th>Win%</th><th>TP2%</th><th>TP3%</th><th>SL%</th>
                 <th>WF Score</th><th>Score</th><th>Grade</th>
-                <th>Regime</th><th>Updated</th>
+                <th>Regime</th><th>Updated</th><th></th>
             </tr>
         </thead>
         <tbody>
@@ -100,6 +106,7 @@
                 <td><span class="grade grade-{{ r.confidence_grade }}">{{ r.confidence_grade }}</span></td>
                 <td><span class="regime-{{ r.regime }}">{{ r.regime }}</span></td>
                 <td style="color: var(--muted); font-size: 12px;">{{ r.optimized_at.strftime('%m/%d %H:%M') if r.optimized_at else '—' }}</td>
+                <td><button class="btn" style="font-size:11px; padding:3px 8px;" onclick="optimizeSymbol('{{ r.symbol }}', '{{ r.timeframe }}', this)">Optimize</button></td>
             </tr>
             {% endfor %}
         </tbody>
@@ -107,11 +114,65 @@
     {% else %}
     <div class="empty-state">
         <h3>No results yet</h3>
-        <p>Trigger an optimization via the API or wait for the next scheduled run.</p>
+        <p>Click "Run Full Optimization" above or wait for the next scheduled run.</p>
         <br>
         <code style="color: var(--accent);">POST /api/optimize {"symbol": "BTCUSDT", "timeframe": "1h"}</code>
     </div>
     {% endif %}
 </div>
+
+<script>
+function runAllOptimizations() {
+    var btn = document.getElementById('btn-run-all');
+    var status = document.getElementById('run-all-status');
+    btn.disabled = true;
+    btn.textContent = '⏳ Running...';
+    status.textContent = '';
+    fetch('/api/optimize/all', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            status.style.color = 'var(--green)';
+            status.textContent = data.message || 'Started!';
+            setTimeout(function() {
+                btn.disabled = false;
+                btn.textContent = '⚡ Run Full Optimization';
+                status.textContent = '';
+            }, 5000);
+        })
+        .catch(function() {
+            status.style.color = 'var(--red)';
+            status.textContent = 'Failed to start optimization. Please try again.';
+            btn.disabled = false;
+            btn.textContent = '⚡ Run Full Optimization';
+        });
+}
+
+function optimizeSymbol(symbol, timeframe, btn) {
+    var orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏳';
+    fetch('/api/optimize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol: symbol, timeframe: timeframe })
+    })
+        .then(function(r) { return r.json(); })
+        .then(function() {
+            btn.textContent = '✓ Started';
+            btn.style.color = 'var(--green)';
+            setTimeout(function() {
+                btn.disabled = false;
+                btn.textContent = orig;
+                btn.style.color = '';
+            }, 4000);
+        })
+        .catch(function() {
+            btn.disabled = false;
+            btn.textContent = orig;
+            btn.style.color = 'var(--red)';
+            setTimeout(function() { btn.style.color = ''; }, 3000);
+        });
+}
+</script>
 
 {% endblock %}

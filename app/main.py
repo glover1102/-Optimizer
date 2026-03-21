@@ -6,7 +6,8 @@ Endpoints:
   GET  /results/{symbol}/{timeframe}  → Detail HTML
   GET  /api/results                   → All results JSON
   GET  /api/results/{symbol}/{tf}     → Specific result JSON
-  POST /api/optimize                  → Trigger manual optimization
+  POST /api/optimize                  → Trigger manual optimization (single symbol)
+  POST /api/optimize/all              → Trigger full watchlist optimization
   POST /api/webhook/tv                → Receive TradingView alert webhooks
   GET  /api/health                    → Health check
 """
@@ -313,6 +314,26 @@ async def api_optimize(req: OptimizeRequest):
         "timeframe": req.timeframe,
         "trials": req.trials,
         "message": "Optimization running in background. Check /api/results for updates.",
+    }
+
+
+@app.post("/api/optimize/all")
+async def api_optimize_all():
+    """Trigger optimization for all symbols/timeframes in the watchlist."""
+
+    def _run():
+        from app.scheduler import _run_full_watchlist  # deferred — consistent with app import pattern
+        try:
+            _run_full_watchlist()
+        except Exception as exc:
+            logger.error("Full watchlist optimization failed: %s", exc)
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+
+    return {
+        "status": "started",
+        "message": "Full watchlist optimization running in background...",
     }
 
 

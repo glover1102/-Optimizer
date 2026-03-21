@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}{{ symbol }} {{ timeframe }} — QTAlgo Optimizer{% endblock %}
+{% block content %}
+
+<div style="margin-bottom: 16px;">
+    <a href="/" class="btn">← Back to Dashboard</a>
+</div>
+
+{% if result %}
+<div class="card">
+    <div class="card-title">{{ result.symbol }} / {{ result.timeframe }} — Best Parameters</div>
+    <div class="stat-grid">
+        <div class="stat-card">
+            <div class="stat-label">Left Bars</div>
+            <div class="stat-value">{{ result.left_bars }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Right Bars</div>
+            <div class="stat-value">{{ result.right_bars }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Offset</div>
+            <div class="stat-value">{{ "%.2f" | format(result.offset) }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">ATR Multiplier</div>
+            <div class="stat-value">{{ "%.2f" | format(result.atr_multiplier) }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">ATR Period</div>
+            <div class="stat-value">{{ result.atr_period }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Regime</div>
+            <div class="stat-value regime-{{ result.regime }}" style="font-size: 16px;">{{ result.regime }}</div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title">Performance Metrics</div>
+    <div class="stat-grid">
+        <div class="stat-card">
+            <div class="stat-label">Win Rate</div>
+            <div class="stat-value" style="color: var(--green);">{{ "%.1f" | format(result.win_rate * 100) }}%</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">TP2 Rate</div>
+            <div class="stat-value">{{ "%.1f" | format(result.tp2_rate * 100) }}%</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">TP3 Rate</div>
+            <div class="stat-value">{{ "%.1f" | format(result.tp3_rate * 100) }}%</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">SL Rate</div>
+            <div class="stat-value" style="color: var(--red);">{{ "%.1f" | format(result.sl_rate * 100) }}%</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Total Signals</div>
+            <div class="stat-value">{{ result.total_signals }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Confidence</div>
+            <div class="stat-value">
+                <span class="grade grade-{{ result.confidence_grade }}">{{ result.confidence_grade }}</span>
+                &nbsp;{{ "%.1f" | format(result.confidence_score) }}
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if wf_windows %}
+<div class="card">
+    <div class="card-title">Walk-Forward Validation Windows</div>
+    <table>
+        <thead>
+            <tr>
+                <th>Window</th>
+                <th>IS Bars</th><th>OOS Bars</th>
+                <th>IS Signals</th><th>OOS Signals</th>
+                <th>IS Win%</th><th>OOS Win%</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for w in wf_windows %}
+            <tr>
+                <td>{{ w.window }}</td>
+                <td>{{ w.is_bars }}</td>
+                <td>{{ w.oos_bars }}</td>
+                <td>{{ w.is_signals }}</td>
+                <td>{{ w.oos_signals }}</td>
+                <td>{{ ("%.1f" | format(w.is_win_rate * 100)) ~ "%" if w.is_win_rate is not none else "—" }}</td>
+                <td>{{ ("%.1f" | format(w.oos_win_rate * 100)) ~ "%" if w.oos_win_rate is not none else "—" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div style="margin-top: 12px; color: var(--muted); font-size: 12px;">
+        Walk-Forward Score: <strong style="color: var(--text);">{{ "%.1f" | format(result.walk_forward_score) }}</strong>
+        &nbsp;|&nbsp;
+        Consistency: <strong style="color: var(--text);">{{ "%.1f" | format(result.consistency_score * 100) }}%</strong>
+    </div>
+</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-title">Optimized At</div>
+    <p style="color: var(--muted);">{{ result.optimized_at }}</p>
+</div>
+
+{% else %}
+<div class="empty-state">
+    <h3>No result found</h3>
+    <p>{{ symbol }} / {{ timeframe }} has not been optimized yet.</p>
+</div>
+{% endif %}
+
+{% endblock %}

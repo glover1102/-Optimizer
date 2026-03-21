@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — QTAlgo Optimizer{% endblock %}
+{% block content %}
+
+<div class="stat-grid">
+    <div class="stat-card">
+        <div class="stat-label">Total Results</div>
+        <div class="stat-value">{{ results | length }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Grade A Results</div>
+        <div class="stat-value" style="color: var(--green);">{{ results | selectattr('confidence_grade', 'equalto', 'A') | list | length }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Last Run</div>
+        <div class="stat-value" style="font-size:13px; padding-top:6px;">{{ last_run or "Not yet run" }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Next Run</div>
+        <div class="stat-value" style="font-size:13px; padding-top:6px;">{{ next_run or "—" }}</div>
+    </div>
+</div>
+
+{% set top_results = results | selectattr('confidence_grade', 'in', ['A', 'B']) | list %}
+{% if top_results %}
+<div class="card">
+    <div class="card-title">🟢 Top Picks (Grade A &amp; B)</div>
+    <table>
+        <thead>
+            <tr>
+                <th>Symbol</th><th>TF</th><th>Class</th>
+                <th>LB / RB</th><th>Offset</th><th>Mult</th><th>ATR Per</th>
+                <th>Win%</th><th>TP2%</th><th>SL%</th>
+                <th>Score</th><th>Grade</th><th>Regime</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in top_results[:10] %}
+            <tr>
+                <td><a href="/results/{{ r.symbol }}/{{ r.timeframe }}">{{ r.symbol }}</a></td>
+                <td>{{ r.timeframe }}</td>
+                <td><span class="badge badge-{{ r.asset_class }}">{{ r.asset_class }}</span></td>
+                <td>{{ r.left_bars }} / {{ r.right_bars }}</td>
+                <td>{{ "%.2f" | format(r.offset) }}</td>
+                <td>{{ "%.2f" | format(r.atr_multiplier) }}</td>
+                <td>{{ r.atr_period }}</td>
+                <td>{{ "%.1f" | format(r.win_rate * 100) }}%</td>
+                <td>{{ "%.1f" | format(r.tp2_rate * 100) }}%</td>
+                <td>{{ "%.1f" | format(r.sl_rate * 100) }}%</td>
+                <td>{{ "%.1f" | format(r.confidence_score) }}</td>
+                <td><span class="grade grade-{{ r.confidence_grade }}">{{ r.confidence_grade }}</span></td>
+                <td><span class="regime-{{ r.regime }}">{{ r.regime }}</span></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-title">All Optimization Results</div>
+    <div class="filter-bar">
+        <label>Filter by class:</label>
+        {% for cls in ['crypto', 'forex', 'stocks', 'indices', 'futures'] %}
+        <a href="/?class={{ cls }}" class="btn {% if selected_class == cls %}btn-primary{% endif %}">{{ cls }}</a>
+        {% endfor %}
+        {% if selected_class %}
+        <a href="/" class="btn">Clear</a>
+        {% endif %}
+    </div>
+
+    {% if results %}
+    <table>
+        <thead>
+            <tr>
+                <th>Symbol</th><th>TF</th><th>Class</th>
+                <th>LB / RB</th><th>Offset</th><th>Mult</th><th>ATR Per</th>
+                <th>Signals</th><th>Win%</th><th>TP2%</th><th>TP3%</th><th>SL%</th>
+                <th>WF Score</th><th>Score</th><th>Grade</th>
+                <th>Regime</th><th>Updated</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in results %}
+            <tr>
+                <td><a href="/results/{{ r.symbol }}/{{ r.timeframe }}">{{ r.symbol }}</a></td>
+                <td>{{ r.timeframe }}</td>
+                <td><span class="badge badge-{{ r.asset_class }}">{{ r.asset_class }}</span></td>
+                <td>{{ r.left_bars }} / {{ r.right_bars }}</td>
+                <td>{{ "%.2f" | format(r.offset) }}</td>
+                <td>{{ "%.2f" | format(r.atr_multiplier) }}</td>
+                <td>{{ r.atr_period }}</td>
+                <td>{{ r.total_signals }}</td>
+                <td>{{ "%.1f" | format(r.win_rate * 100) }}%</td>
+                <td>{{ "%.1f" | format(r.tp2_rate * 100) }}%</td>
+                <td>{{ "%.1f" | format(r.tp3_rate * 100) }}%</td>
+                <td>{{ "%.1f" | format(r.sl_rate * 100) }}%</td>
+                <td>{{ "%.1f" | format(r.walk_forward_score) }}</td>
+                <td>{{ "%.1f" | format(r.confidence_score) }}</td>
+                <td><span class="grade grade-{{ r.confidence_grade }}">{{ r.confidence_grade }}</span></td>
+                <td><span class="regime-{{ r.regime }}">{{ r.regime }}</span></td>
+                <td style="color: var(--muted); font-size: 12px;">{{ r.optimized_at.strftime('%m/%d %H:%M') if r.optimized_at else '—' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <h3>No results yet</h3>
+        <p>Trigger an optimization via the API or wait for the next scheduled run.</p>
+        <br>
+        <code style="color: var(--accent);">POST /api/optimize {"symbol": "BTCUSDT", "timeframe": "1h"}</code>
+    </div>
+    {% endif %}
+</div>
+
+{% endblock %}

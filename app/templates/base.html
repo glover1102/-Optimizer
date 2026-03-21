@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}QTAlgo Optimizer{% endblock %}</title>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --bg: #0d1117;
+            --card: #161b22;
+            --text: #e6edf3;
+            --muted: #8b949e;
+            --border: #30363d;
+            --accent: #58a6ff;
+            --green: #3fb950;
+            --yellow: #d29922;
+            --orange: #f0883e;
+            --red: #f85149;
+            --purple: #bc8cff;
+        }
+
+        body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace; font-size: 14px; line-height: 1.6; }
+
+        a { color: var(--accent); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+
+        header { background: var(--card); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; gap: 16px; }
+        header h1 { font-size: 18px; font-weight: 600; color: var(--text); }
+        header nav { margin-left: auto; display: flex; gap: 16px; }
+        header nav a { color: var(--muted); font-size: 13px; }
+        header nav a:hover { color: var(--text); }
+
+        .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+        .card-title { font-size: 15px; font-weight: 600; margin-bottom: 16px; color: var(--text); }
+
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th { text-align: left; padding: 8px 12px; color: var(--muted); font-weight: 500; border-bottom: 1px solid var(--border); white-space: nowrap; }
+        td { padding: 8px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: rgba(255,255,255,0.03); }
+
+        .grade { display: inline-block; width: 22px; height: 22px; border-radius: 4px; text-align: center; line-height: 22px; font-weight: 700; font-size: 12px; }
+        .grade-A { background: var(--green); color: #000; }
+        .grade-B { background: #1f6feb; color: #fff; }
+        .grade-C { background: var(--yellow); color: #000; }
+        .grade-D { background: var(--orange); color: #000; }
+        .grade-F { background: var(--red); color: #fff; }
+
+        .regime-trending { color: var(--green); }
+        .regime-ranging  { color: var(--yellow); }
+        .regime-volatile { color: var(--orange); }
+
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+        .badge-crypto  { background: #1c2c3e; color: var(--accent); }
+        .badge-forex   { background: #1e2a1e; color: var(--green); }
+        .badge-stocks  { background: #2a1e2e; color: var(--purple); }
+        .badge-indices { background: #2a2a1e; color: var(--yellow); }
+        .badge-futures { background: #2a1e1e; color: var(--orange); }
+
+        .btn { display: inline-block; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--card); color: var(--text); cursor: pointer; font-size: 13px; }
+        .btn:hover { border-color: var(--accent); color: var(--accent); }
+        .btn-primary { background: var(--accent); color: #000; border-color: var(--accent); }
+        .btn-primary:hover { opacity: 0.85; }
+
+        .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 16px; margin-bottom: 20px; }
+        .stat-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+        .stat-label { color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+        .stat-value { font-size: 22px; font-weight: 700; color: var(--text); }
+
+        footer { text-align: center; padding: 24px; color: var(--muted); font-size: 12px; border-top: 1px solid var(--border); margin-top: 40px; }
+
+        .filter-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
+        .filter-bar label { color: var(--muted); font-size: 12px; }
+
+        .empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
+        .empty-state h3 { font-size: 18px; margin-bottom: 8px; color: var(--text); }
+    </style>
+</head>
+<body>
+<header>
+    <h1>🤖 QTAlgo Optimizer</h1>
+    <nav>
+        <a href="/">Dashboard</a>
+        <a href="/api/results">JSON API</a>
+        <a href="/api/health">Health</a>
+    </nav>
+</header>
+<main class="container">
+    {% block content %}{% endblock %}
+</main>
+<footer>
+    QTAlgo Optimizer — Bayesian parameter optimization for QTAlgo Pine Script indicator
+</footer>
+</body>
+</html>

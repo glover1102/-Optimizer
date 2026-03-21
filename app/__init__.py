@@ -1,0 +1,1 @@
+# QTAlgo Optimizer application package

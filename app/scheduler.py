@@ -106,6 +106,29 @@ def _optimize_symbol(symbol: str, timeframe: str, db_session) -> None:
             "Saved result for %s %s: win_rate=%.1f%% grade=%s",
             symbol, timeframe, best_bt["win_rate"] * 100, score["confidence_grade"]
         )
+
+        # Notify Discord for Grade A/B results
+        try:
+            from app.discord_notifier import notify_optimization_result
+            notify_optimization_result({
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "confidence_grade": score["confidence_grade"],
+                "confidence_score": score["confidence_score"],
+                "win_rate": best_bt["win_rate"],
+                "tp2_rate": best_bt["tp2_rate"],
+                "tp3_rate": best_bt["tp3_rate"],
+                "sl_rate": best_bt["sl_rate"],
+                "left_bars": best_params.get("left_bars"),
+                "right_bars": best_params.get("right_bars"),
+                "offset": best_params.get("offset"),
+                "atr_multiplier": best_params.get("atr_multiplier"),
+                "atr_period": best_params.get("atr_period"),
+                "regime": regime_info["regime"],
+                "walk_forward_score": wf_result["walk_forward_score"],
+            })
+        except Exception as exc:
+            logger.warning("Discord notification error for %s %s: %s", symbol, timeframe, exc)
     except Exception as exc:
         logger.error("DB save failed for %s %s: %s", symbol, timeframe, exc)
         db_session.rollback()

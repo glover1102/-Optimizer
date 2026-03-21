@@ -21,7 +21,7 @@ def init_db() -> None:
         logger.info("Database tables created / verified.")
     except Exception as exc:
         logger.error("Failed to initialise database: %s", exc)
-        raise
+        logger.warning("App starting without database — will retry on next request.")
 
 
 def get_db():

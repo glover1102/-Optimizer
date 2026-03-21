@@ -39,11 +39,20 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    init_db()
-    start_scheduler()
+    try:
+        init_db()
+    except Exception as exc:
+        logger.error("Database init failed: %s — app will start without DB", exc)
+    try:
+        start_scheduler()
+    except Exception as exc:
+        logger.error("Scheduler start failed: %s", exc)
     logger.info("QTAlgo Optimizer started.")
     yield
-    stop_scheduler()
+    try:
+        stop_scheduler()
+    except Exception as exc:
+        logger.error("Scheduler stop failed: %s", exc)
     logger.info("QTAlgo Optimizer stopped.")
 
 
@@ -255,7 +264,11 @@ async def webhook_tradingview(payload: TVWebhookPayload):
 
 @app.get("/api/health")
 async def health():
-    status = get_scheduler_status()
+    try:
+        status = get_scheduler_status()
+    except Exception as exc:
+        logger.warning("Could not retrieve scheduler status: %s", exc)
+        status = {"last_run": None, "next_run": None, "running": False}
     return {
         "status": "ok",
         "last_run": status["last_run"],

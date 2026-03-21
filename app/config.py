@@ -3,7 +3,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./qtalgo.db")
+_raw_db_url = os.getenv("DATABASE_URL", "sqlite:///./qtalgo.db")
+# Railway PostgreSQL uses postgres:// but SQLAlchemy needs postgresql://
+if _raw_db_url.startswith("postgres://"):
+    DATABASE_URL: str = _raw_db_url.replace("postgres://", "postgresql://", 1)
+else:
+    DATABASE_URL: str = _raw_db_url
 REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379")
 BINANCE_API_KEY: str = os.getenv("BINANCE_API_KEY", "")
 BINANCE_SECRET: str = os.getenv("BINANCE_SECRET", "")

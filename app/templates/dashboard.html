@@ -68,7 +68,7 @@
     <div class="filter-bar">
         <label>Filter by class:</label>
         {% for cls in ['crypto', 'forex', 'stocks', 'indices', 'futures'] %}
-        <a href="/?class={{ cls }}" class="btn {% if selected_class == cls %}btn-primary{% endif %}">{{ cls }}</a>
+        <a href="/?asset_class={{ cls }}" class="btn {% if selected_class == cls %}btn-primary{% endif %}">{{ cls }}</a>
         {% endfor %}
         {% if selected_class %}
         <a href="/" class="btn">Clear</a>

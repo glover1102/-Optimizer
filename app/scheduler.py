@@ -57,13 +57,14 @@ def _optimize_symbol(symbol: str, timeframe: str, db_session) -> None:
     wf_result = run_walk_forward(high, low, close, best_params)
 
     # Confidence scoring
+    wf_scores = [
+        w["oos_win_rate"] for w in wf_result["windows"] if w["oos_win_rate"] is not None
+    ]
     score = score_result(
         total_signals=best_bt["total_signals"],
         wins=best_bt["wins"],
         sl_hits=best_bt["sl_hits"],
-        walk_forward_scores=[
-            w["oos_win_rate"] for w in wf_result["windows"] if w["oos_win_rate"] is not None
-        ],
+        walk_forward_scores=wf_scores if wf_scores else None,
     )
 
     # Persist to database

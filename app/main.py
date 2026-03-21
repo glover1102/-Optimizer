@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -32,12 +33,27 @@ from app.scheduler import start_scheduler, stop_scheduler, get_scheduler_status
 
 logger = logging.getLogger(__name__)
 
+# ── Lifespan ─────────────────────────────────────────────────────────────────
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    init_db()
+    start_scheduler()
+    logger.info("QTAlgo Optimizer started.")
+    yield
+    stop_scheduler()
+    logger.info("QTAlgo Optimizer stopped.")
+
+
 # ── App setup ────────────────────────────────────────────────────────────────
 
 app = FastAPI(
     title="QTAlgo Optimizer",
     description="Bayesian parameter optimization server for the QTAlgo TradingView indicator",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -49,22 +65,6 @@ app.add_middleware(
 )
 
 templates = Jinja2Templates(directory="app/templates")
-
-# ── Lifecycle ────────────────────────────────────────────────────────────────
-
-
-@app.on_event("startup")
-async def on_startup() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    init_db()
-    start_scheduler()
-    logger.info("QTAlgo Optimizer started.")
-
-
-@app.on_event("shutdown")
-async def on_shutdown() -> None:
-    stop_scheduler()
-    logger.info("QTAlgo Optimizer stopped.")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

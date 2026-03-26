@@ -185,6 +185,7 @@ def run_backtest(
     # ── Simulate trades ───────────────────────────────────────────────────
     wins = tp2_hits = tp3_hits = sl_hits = 0
     total_signals = len(all_signals)
+    trades: list[dict] = []
 
     for idx, (sig_bar, direction) in enumerate(zip(all_signals, directions)):
         entry = close[sig_bar]
@@ -261,6 +262,24 @@ def run_backtest(
         if sl_hit:
             sl_hits += 1
 
+        result_str = (
+            "tp3_hit" if tp3_hit else
+            "tp2_hit" if tp2_hit else
+            "tp1_hit" if tp1_hit else
+            "sl_hit" if sl_hit else
+            "open"
+        )
+        trades.append({
+            "bar": int(sig_bar),
+            "direction": "BUY" if direction == 1 else "SELL",
+            "entry": float(entry),
+            "sl": float(sl),
+            "tp1": float(tp1),
+            "tp2": float(tp2),
+            "tp3": float(tp3),
+            "result": result_str,
+        })
+
     if total_signals <= 0:
         return _empty_result()
 
@@ -279,6 +298,7 @@ def run_backtest(
         "tp2_rate": round(tp2_rate, 4),
         "tp3_rate": round(tp3_rate, 4),
         "sl_rate": round(sl_rate, 4),
+        "trades": trades,
     }
 
 
@@ -293,4 +313,5 @@ def _empty_result() -> dict[str, Any]:
         "tp2_rate": 0.0,
         "tp3_rate": 0.0,
         "sl_rate": 0.0,
+        "trades": [],
     }

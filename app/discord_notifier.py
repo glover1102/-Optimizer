@@ -137,3 +137,79 @@ def notify_optimization_result(result_dict: dict) -> None:
         logger.warning("Discord notification failed (network): %s", exc)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Discord notification failed: %s", exc)
+
+
+def notify_signal(symbol: str, timeframe: str, signal_dict: dict) -> None:
+    """Send a Discord embed for a BUY or SELL signal recommendation.
+
+    Parameters
+    ----------
+    symbol:
+        Trading symbol.
+    timeframe:
+        Chart timeframe.
+    signal_dict:
+        Signal dict as returned by signal_generator.generate_signal().
+    """
+    try:
+        webhook_url = os.environ.get("DISCORD_WEBHOOK_URL", "")
+        if not webhook_url:
+            return
+
+        action = signal_dict.get("action", "HOLD")
+        if action == "HOLD":
+            return
+
+        color = 0x00FF00 if action == "BUY" else 0xFF0000
+        emoji = "🟢" if action == "BUY" else "🔴"
+        title = f"{emoji} {action} Signal — {symbol} {timeframe}"
+
+        entry = signal_dict.get("entry_price")
+        sl = signal_dict.get("sl_price")
+        tp1 = signal_dict.get("tp1_price")
+        tp2 = signal_dict.get("tp2_price")
+        tp3 = signal_dict.get("tp3_price")
+        strength = signal_dict.get("strength", 0)
+        confidence = signal_dict.get("confidence", 0.0)
+        regime = signal_dict.get("regime", "unknown")
+        entry_mode = signal_dict.get("entry_mode", "Pivot")
+        is_confluence = signal_dict.get("is_confluence", False)
+
+        def _fmt(v):
+            return f"{v:.6g}" if v is not None else "N/A"
+
+        fields = [
+            {"name": "Entry", "value": _fmt(entry), "inline": True},
+            {"name": "SL", "value": _fmt(sl), "inline": True},
+            {"name": "TP1", "value": _fmt(tp1), "inline": True},
+            {"name": "TP2", "value": _fmt(tp2), "inline": True},
+            {"name": "TP3", "value": _fmt(tp3), "inline": True},
+            {"name": "Strength", "value": f"{strength}/4", "inline": True},
+            {"name": "Confidence", "value": f"{confidence * 100:.0f}%", "inline": True},
+            {"name": "Regime", "value": str(regime), "inline": True},
+            {"name": "Mode", "value": f"{entry_mode}{'  ⚡ Confluence' if is_confluence else ''}", "inline": True},
+        ]
+
+        embed = {
+            "title": title,
+            "color": color,
+            "fields": fields,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        payload = json.dumps({"embeds": [embed]}).encode("utf-8")
+        req = Request(
+            webhook_url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(req, timeout=10) as resp:  # noqa: S310
+            logger.debug(
+                "Discord signal notification sent for %s %s (HTTP %d)",
+                symbol, timeframe, resp.status,
+            )
+    except (URLError, OSError) as exc:
+        logger.warning("Discord signal notification failed (network): %s", exc)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Discord signal notification failed: %s", exc)

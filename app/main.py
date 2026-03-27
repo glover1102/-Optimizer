@@ -8,12 +8,17 @@ Endpoints:
   GET  /api/results/{symbol}/{tf}     → Specific result JSON
   POST /api/optimize                  → Trigger manual optimization (single symbol)
   POST /api/optimize/all              → Trigger full watchlist optimization
+  POST /api/signals/generate          → Trigger signal generation (single symbol)
+  POST /api/signals/generate/all      → Trigger signal generation for all watchlist
+  GET  /api/signals                   → Get all current signals
+  GET  /api/signals/{symbol}/{tf}     → Get signal for symbol/timeframe
   POST /api/webhook/tv                → Receive TradingView alert webhooks
   GET  /api/health                    → Health check
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 from contextlib import asynccontextmanager
@@ -114,6 +119,28 @@ def _result_to_dict(r) -> dict[str, Any]:
     }
 
 
+def _signal_to_dict(s) -> dict[str, Any]:
+    return {
+        "id": s.id,
+        "symbol": s.symbol,
+        "timeframe": s.timeframe,
+        "action": s.action,
+        "strength": s.strength,
+        "entry_price": s.entry_price,
+        "sl_price": s.sl_price,
+        "tp1_price": s.tp1_price,
+        "tp2_price": s.tp2_price,
+        "tp3_price": s.tp3_price,
+        "regime": s.regime,
+        "entry_mode": s.entry_mode,
+        "is_confluence": s.is_confluence,
+        "confidence": s.confidence,
+        "filters_used": s.filters_used,
+        "created_at": s.created_at.isoformat() if s.created_at else None,
+        "is_current": s.is_current,
+    }
+
+
 # ── HTML routes ───────────────────────────────────────────────────────────────
 
 
@@ -132,6 +159,7 @@ async def dashboard(
                 {
                     "request": request,
                     "results": [],
+                    "signals": [],
                     "selected_class": asset_class,
                     "last_run": None,
                     "next_run": None,
@@ -141,6 +169,7 @@ async def dashboard(
         db_gen = get_db()
         db = next(db_gen)
         try:
+            from app.models import SignalRecommendation
             query = db.query(OptimizationResult).filter(OptimizationResult.is_current == True)
             if asset_class:
                 symbols = WATCHLIST.get(asset_class, [])
@@ -153,6 +182,13 @@ async def dashboard(
                 obj.optimized_at = r.optimized_at
                 obj.asset_class = _asset_class(r.symbol)
                 enriched.append(obj)
+
+            sig_query = db.query(SignalRecommendation).filter(SignalRecommendation.is_current == True)
+            if asset_class:
+                symbols = WATCHLIST.get(asset_class, [])
+                sig_query = sig_query.filter(SignalRecommendation.symbol.in_(symbols))
+            raw_signals = sig_query.order_by(SignalRecommendation.created_at.desc()).all()
+            signals = [_signal_to_dict(s) for s in raw_signals]
         finally:
             db_gen.close()
 
@@ -166,6 +202,7 @@ async def dashboard(
             {
                 "request": request,
                 "results": enriched,
+                "signals": signals,
                 "selected_class": asset_class,
                 "last_run": status["last_run"],
                 "next_run": status["next_run"],
@@ -178,6 +215,7 @@ async def dashboard(
             {
                 "request": request,
                 "results": [],
+                "signals": [],
                 "selected_class": asset_class,
                 "last_run": None,
                 "next_run": None,
@@ -356,14 +394,211 @@ class TVWebhookPayload(BaseModel):
     message: Optional[str] = None
 
 
+def _persist_signal(sig: dict, symbol: str, timeframe: str) -> None:
+    """Store a signal recommendation in the database (best-effort)."""
+    try:
+        from app.database import get_db, is_db_available
+        from app.models import SignalRecommendation
+        from sqlalchemy import update
+
+        if not is_db_available():
+            return
+
+        db_gen = get_db()
+        db = next(db_gen)
+        try:
+            db.execute(
+                update(SignalRecommendation)
+                .where(
+                    SignalRecommendation.symbol == symbol,
+                    SignalRecommendation.timeframe == timeframe,
+                )
+                .values(is_current=False)
+            )
+            record = SignalRecommendation(
+                symbol=symbol,
+                timeframe=timeframe,
+                action=sig.get("action", "HOLD"),
+                strength=sig.get("strength", 0),
+                entry_price=sig.get("entry_price"),
+                sl_price=sig.get("sl_price"),
+                tp1_price=sig.get("tp1_price"),
+                tp2_price=sig.get("tp2_price"),
+                tp3_price=sig.get("tp3_price"),
+                regime=sig.get("regime"),
+                entry_mode=sig.get("entry_mode"),
+                is_confluence=sig.get("is_confluence", False),
+                confidence=sig.get("confidence", 0.0),
+                filters_used=json.dumps(sig.get("filters_active", [])),
+                is_current=True,
+            )
+            db.add(record)
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            logger.warning("Signal DB persist failed: %s", exc)
+        finally:
+            db_gen.close()
+    except Exception as exc:
+        logger.warning("Signal persist error: %s", exc)
+
+
 @app.post("/api/webhook/tv")
 async def webhook_tradingview(payload: TVWebhookPayload):
-    """Receive TradingView alert webhooks and log them."""
+    """Receive TradingView alert webhooks, store signal, optionally notify Discord."""
     logger.info(
         "TV webhook: symbol=%s tf=%s action=%s price=%s",
         payload.symbol, payload.timeframe, payload.action, payload.price
     )
+
+    action = (payload.action or "").upper()
+    if action in ("BUY", "SELL") and payload.price is not None:
+        sig = {
+            "action": action,
+            "strength": 2,
+            "entry_price": payload.price,
+            "sl_price": None,
+            "tp1_price": None,
+            "tp2_price": None,
+            "tp3_price": None,
+            "regime": "unknown",
+            "filters_active": ["tradingview_webhook"],
+            "entry_mode": "Pivot",
+            "is_confluence": False,
+            "confidence": 0.5,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        def _bg():
+            _persist_signal(sig, payload.symbol, payload.timeframe or "1h")
+            try:
+                from app.discord_notifier import notify_signal
+                notify_signal(payload.symbol, payload.timeframe or "1h", sig)
+            except Exception:
+                pass
+
+        threading.Thread(target=_bg, daemon=True).start()
+
     return {"status": "received", "symbol": payload.symbol, "timeframe": payload.timeframe}
+
+
+# ── Signal API routes ──────────────────────────────────────────────────────────
+
+
+@app.get("/api/signals")
+async def api_signals_all():
+    """Get all current signal recommendations."""
+    try:
+        from app.database import get_db, is_db_available
+        from app.models import SignalRecommendation
+
+        if not is_db_available():
+            return []
+
+        db_gen = get_db()
+        db = next(db_gen)
+        try:
+            signals = (
+                db.query(SignalRecommendation)
+                .filter(SignalRecommendation.is_current == True)
+                .order_by(SignalRecommendation.created_at.desc())
+                .all()
+            )
+            return [_signal_to_dict(s) for s in signals]
+        finally:
+            db_gen.close()
+    except Exception as exc:
+        logger.error("API signals error: %s", exc)
+        return []
+
+
+@app.get("/api/signals/{symbol}/{timeframe}")
+async def api_signal_detail(symbol: str, timeframe: str):
+    """Get current signal for a specific symbol/timeframe."""
+    try:
+        from app.database import get_db, is_db_available
+        from app.models import SignalRecommendation
+
+        if not is_db_available():
+            raise HTTPException(status_code=503, detail="Database unavailable")
+
+        db_gen = get_db()
+        db = next(db_gen)
+        try:
+            sig = (
+                db.query(SignalRecommendation)
+                .filter(
+                    SignalRecommendation.symbol == symbol,
+                    SignalRecommendation.timeframe == timeframe,
+                    SignalRecommendation.is_current == True,
+                )
+                .first()
+            )
+            if not sig:
+                raise HTTPException(status_code=404, detail=f"No signal for {symbol} {timeframe}")
+            return _signal_to_dict(sig)
+        finally:
+            db_gen.close()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+class SignalGenerateRequest(BaseModel):
+    symbol: str
+    timeframe: str
+    code: str = ""
+    params: Optional[dict] = None
+
+
+@app.post("/api/signals/generate")
+async def api_signals_generate(req: SignalGenerateRequest):
+    """Trigger signal generation for a single symbol/timeframe (requires passcode)."""
+    from app.config import OPTIMIZE_PASSCODE
+    if req.code != OPTIMIZE_PASSCODE:
+        raise HTTPException(status_code=403, detail="Invalid code")
+
+    def _run():
+        try:
+            from app.signal_generator import generate_signal
+            sig = generate_signal(req.symbol, req.timeframe, req.params)
+            _persist_signal(sig, req.symbol, req.timeframe)
+        except Exception as exc:
+            logger.error("Manual signal generation failed: %s", exc)
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {
+        "status": "started",
+        "symbol": req.symbol,
+        "timeframe": req.timeframe,
+        "message": "Signal generation running in background. Check /api/signals for updates.",
+    }
+
+
+class SignalGenerateAllRequest(BaseModel):
+    code: str
+
+
+@app.post("/api/signals/generate/all")
+async def api_signals_generate_all(req: SignalGenerateAllRequest):
+    """Trigger signal generation for all watchlist symbols."""
+    from app.config import OPTIMIZE_PASSCODE
+    if req.code != OPTIMIZE_PASSCODE:
+        raise HTTPException(status_code=403, detail="Invalid code")
+
+    def _run():
+        try:
+            from app.scheduler import _run_signal_generation
+            _run_signal_generation()
+        except Exception as exc:
+            logger.error("Bulk signal generation failed: %s", exc)
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {
+        "status": "started",
+        "message": "Signal generation for all watchlist symbols running in background...",
+    }
 
 
 @app.get("/api/health")

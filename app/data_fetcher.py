@@ -205,6 +205,24 @@ def get_numpy_arrays(
     )
 
 
+def get_numpy_arrays_with_volume(
+    symbol: str, timeframe: str
+) -> Optional[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:
+    """
+    Returns (high, low, close, volume) as float64 NumPy arrays,
+    or None if data cannot be fetched.
+    """
+    df = fetch_ohlcv(symbol, timeframe)
+    if df is None or len(df) < 50:
+        return None
+    return (
+        df["high"].to_numpy(dtype=np.float64),
+        df["low"].to_numpy(dtype=np.float64),
+        df["close"].to_numpy(dtype=np.float64),
+        df["volume"].to_numpy(dtype=np.float64),
+    )
+
+
 def clear_cache() -> None:
     """Clear the in-memory data cache."""
     _cache.clear()

@@ -60,3 +60,25 @@ class MarketRegime(Base):
     atr_ratio = Column(Float)
     bb_width = Column(Float)
     detected_at = Column(DateTime, default=func.now())
+
+
+class SignalRecommendation(Base):
+    __tablename__ = "signal_recommendations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String, index=True, nullable=False)
+    timeframe = Column(String, index=True, nullable=False)
+    action = Column(String, nullable=False)       # "BUY", "SELL", "HOLD"
+    strength = Column(Integer)                    # 0-4
+    entry_price = Column(Float)
+    sl_price = Column(Float)
+    tp1_price = Column(Float)
+    tp2_price = Column(Float)
+    tp3_price = Column(Float)
+    regime = Column(String)
+    entry_mode = Column(String)                   # "Pivot", "Crossover", "Hybrid"
+    is_confluence = Column(Boolean, default=False)
+    confidence = Column(Float)
+    filters_used = Column(String)                 # JSON string of active filters
+    created_at = Column(DateTime, default=func.now())
+    is_current = Column(Boolean, default=True)

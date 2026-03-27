@@ -19,6 +19,53 @@ PORT: int = int(os.getenv("PORT", "8000"))
 DISCORD_WEBHOOK_URL: str = os.getenv("DISCORD_WEBHOOK_URL", "")
 OPTIMIZE_PASSCODE: str = os.getenv("OPTIMIZE_PASSCODE", "96541230")
 
+# Signal generation config
+SIGNAL_GENERATION_INTERVAL_MINUTES: int = int(os.getenv("SIGNAL_INTERVAL", "15"))
+DEFAULT_ENTRY_MODE: str = os.getenv("DEFAULT_ENTRY_MODE", "Pivot")
+
+DEFAULT_SIGNAL_PARAMS: dict = {
+    "left_bars": 10,
+    "right_bars": 10,
+    "offset": 2.0,
+    "atr_period": 14,
+    "regime_length": 20,
+    "use_regime_filter": True,
+    "trend_threshold": 3.0,
+    "volume_threshold": 2.0,
+    "require_trend_alignment": True,
+    "require_volume_confirmation": False,
+    "use_rsi_filter": False,
+    "rsi_length": 14,
+    "rsi_overbought": 70.0,
+    "rsi_oversold": 30.0,
+    "use_wt_filter": False,
+    "wt_channel_len": 10,
+    "wt_avg_len": 21,
+    "wt_ob_level": 60,
+    "wt_os_level": -60,
+    "use_ema_trend_filter": False,
+    "ema_trend_period": 300,
+    "use_golden_line": False,
+    "gl_w1": 1.0,
+    "gl_w2": 1.0,
+    "gl_w3": 1.0,
+    "gl_w4": 1.0,
+    "gl_ema1_period": 9,
+    "gl_ema2_period": 50,
+    "use_price_position_filter": False,
+    "entry_mode": "Pivot",
+    "use_rr_targets": False,
+    "rr_tp1": 1.0,
+    "rr_tp2": 2.0,
+    "rr_tp3": 3.0,
+    "atr_multiplier": 0.8,
+    "atr_target": 0.0,
+    "gl_min_separation_atr": 0.5,
+    "gl_cooldown_bars": 3,
+    "gl_confirm_window": 2,
+    "wt_require_cross": False,
+}
+
 WATCHLIST: dict[str, list[str]] = {
     "crypto": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", "DOGEUSDT"],
     "forex": [

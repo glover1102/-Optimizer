@@ -12,7 +12,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from app.config import OPTIMIZATION_INTERVAL_HOURS, WATCHLIST, TIMEFRAMES, DEFAULT_TRIALS
+from app.config import OPTIMIZATION_INTERVAL_HOURS, SIGNAL_GENERATION_INTERVAL_MINUTES, WATCHLIST, TIMEFRAMES, DEFAULT_TRIALS
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +184,83 @@ def _run_full_watchlist() -> None:
     logger.info("=== Optimization run complete: %d symbol/TF pairs ===", symbols_processed)
 
 
+def _run_signal_generation() -> None:
+    """Scheduler callback: generate signals for all watchlist symbols/timeframes."""
+    logger.info("=== Starting scheduled signal generation ===")
+    all_symbols = [s for symbols in WATCHLIST.values() for s in symbols]
+    count = 0
+
+    try:
+        from app.database import get_session_factory, is_db_available
+        from app.models import SignalRecommendation
+        from app.signal_generator import generate_signal
+        from sqlalchemy import update
+
+        if not is_db_available():
+            logger.warning("DB not available for signal generation — skipping")
+            return
+
+        factory = get_session_factory()
+        db = factory()
+    except Exception as exc:
+        logger.error("Cannot set up signal generation: %s", exc)
+        return
+
+    try:
+        for symbol in all_symbols:
+            for tf in TIMEFRAMES:
+                try:
+                    sig = generate_signal(symbol, tf)
+                    # Mark old signals as not current
+                    db.execute(
+                        update(SignalRecommendation)
+                        .where(
+                            SignalRecommendation.symbol == symbol,
+                            SignalRecommendation.timeframe == tf,
+                        )
+                        .values(is_current=False)
+                    )
+                    record = SignalRecommendation(
+                        symbol=symbol,
+                        timeframe=tf,
+                        action=sig.get("action", "HOLD"),
+                        strength=sig.get("strength", 0),
+                        entry_price=sig.get("entry_price"),
+                        sl_price=sig.get("sl_price"),
+                        tp1_price=sig.get("tp1_price"),
+                        tp2_price=sig.get("tp2_price"),
+                        tp3_price=sig.get("tp3_price"),
+                        regime=sig.get("regime"),
+                        entry_mode=sig.get("entry_mode"),
+                        is_confluence=sig.get("is_confluence", False),
+                        confidence=sig.get("confidence", 0.0),
+                        filters_used=__import__("json").dumps(sig.get("filters_active", [])),
+                        is_current=True,
+                    )
+                    db.add(record)
+                    db.commit()
+                    count += 1
+
+                    # Discord notification for BUY/SELL signals
+                    if sig.get("action") in ("BUY", "SELL"):
+                        try:
+                            from app.discord_notifier import notify_signal
+                            notify_signal(symbol, tf, sig)
+                        except Exception as exc:
+                            logger.debug("Discord signal notify error: %s", exc)
+
+                except Exception as exc:
+                    logger.error("Signal gen error for %s %s: %s", symbol, tf, exc)
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+    finally:
+        db.close()
+
+    logger.info("=== Signal generation complete: %d symbol/TF pairs ===", count)
+
+
 def start_scheduler() -> None:
     """Start the APScheduler background scheduler."""
     global _scheduler, _next_run
@@ -199,11 +276,17 @@ def start_scheduler() -> None:
             id="full_watchlist_optimization",
             replace_existing=True,
         )
+        _scheduler.add_job(
+            _run_signal_generation,
+            trigger=IntervalTrigger(minutes=SIGNAL_GENERATION_INTERVAL_MINUTES),
+            id="signal_generation",
+            replace_existing=True,
+        )
         _scheduler.start()
         _next_run = datetime.now(timezone.utc) + timedelta(hours=OPTIMIZATION_INTERVAL_HOURS)
         logger.info(
-            "Scheduler started — runs every %d hours. Next run: %s",
-            OPTIMIZATION_INTERVAL_HOURS, _next_run.isoformat()
+            "Scheduler started — optimization every %d hours, signals every %d min. Next opt run: %s",
+            OPTIMIZATION_INTERVAL_HOURS, SIGNAL_GENERATION_INTERVAL_MINUTES, _next_run.isoformat()
         )
     except Exception as exc:
         logger.error("Failed to start scheduler: %s", exc)

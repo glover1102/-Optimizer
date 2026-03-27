@@ -12,6 +12,10 @@
         <div class="stat-value" style="color: var(--green);">{{ results | selectattr('confidence_grade', 'equalto', 'A') | list | length }}</div>
     </div>
     <div class="stat-card">
+        <div class="stat-label">Active Signals</div>
+        <div class="stat-value" style="color: var(--accent);">{{ signals | selectattr('action', 'ne', 'HOLD') | list | length }}</div>
+    </div>
+    <div class="stat-card">
         <div class="stat-label">Last Run</div>
         <div class="stat-value" style="font-size:13px; padding-top:6px;">{{ last_run or "Not yet run" }}</div>
     </div>
@@ -21,10 +25,47 @@
     </div>
 </div>
 
-<div style="margin-bottom: 20px; display: flex; align-items: center; gap: 12px;">
+<div style="margin-bottom: 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
     <button id="btn-run-all" class="btn btn-primary" onclick="runAllOptimizations()">⚡ Run Full Optimization</button>
+    <button id="btn-gen-signals" class="btn btn-primary" style="background: var(--accent);" onclick="generateAllSignals()">📡 Generate Signals</button>
     <span id="run-all-status" style="font-size: 13px; color: var(--muted);"></span>
 </div>
+
+{% set active_signals = signals | selectattr('action', 'ne', 'HOLD') | list %}
+{% if active_signals %}
+<div class="card">
+    <div class="card-title">📡 Current Signal Recommendations</div>
+    <table>
+        <thead>
+            <tr>
+                <th>Symbol</th><th>TF</th><th>Signal</th><th>Entry</th>
+                <th>SL</th><th>TP1</th><th>TP2</th><th>TP3</th>
+                <th>Strength</th><th>Conf</th><th>Regime</th><th>Mode</th><th>Updated</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in active_signals %}
+            {% set action_color = 'var(--green)' if s.action == 'BUY' else 'var(--red)' %}
+            <tr>
+                <td><strong>{{ s.symbol }}</strong></td>
+                <td>{{ s.timeframe }}</td>
+                <td><span style="color: {{ action_color }}; font-weight: bold;">{{ s.action }}</span>{% if s.is_confluence %} <span title="Confluence signal">⚡</span>{% endif %}</td>
+                <td>{{ "%.5g" | format(s.entry_price) if s.entry_price else "—" }}</td>
+                <td style="color: var(--red);">{{ "%.5g" | format(s.sl_price) if s.sl_price else "—" }}</td>
+                <td style="color: var(--green);">{{ "%.5g" | format(s.tp1_price) if s.tp1_price else "—" }}</td>
+                <td style="color: var(--green);">{{ "%.5g" | format(s.tp2_price) if s.tp2_price else "—" }}</td>
+                <td style="color: var(--green);">{{ "%.5g" | format(s.tp3_price) if s.tp3_price else "—" }}</td>
+                <td>{{ s.strength }}/4</td>
+                <td>{{ "%.0f" | format(s.confidence * 100) }}%</td>
+                <td>{{ s.regime or "—" }}</td>
+                <td>{{ s.entry_mode or "—" }}</td>
+                <td style="color: var(--muted); font-size: 12px;">{{ s.created_at[:16] if s.created_at else "—" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
 
 {% set top_results = results | selectattr('confidence_grade', 'in', ['A', 'B']) | list %}
 {% if top_results %}
@@ -156,6 +197,44 @@ function runAllOptimizations() {
             status.textContent = err.message === 'Invalid code' ? '❌ Invalid code.' : 'Failed to start optimization.';
             btn.disabled = false;
             btn.textContent = '⚡ Run Full Optimization';
+        });
+}
+
+function generateAllSignals() {
+    var code = prompt('Enter code to generate signals:');
+    if (!code) return;
+
+    var btn = document.getElementById('btn-gen-signals');
+    var status = document.getElementById('run-all-status');
+    btn.disabled = true;
+    btn.textContent = '⏳ Generating...';
+    status.textContent = '';
+    fetch('/api/signals/generate/all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: code })
+    })
+        .then(function(r) {
+            if (r.status === 403) {
+                throw new Error('Invalid code');
+            }
+            return r.json();
+        })
+        .then(function(data) {
+            status.style.color = 'var(--green)';
+            status.textContent = data.message || 'Signal generation started!';
+            setTimeout(function() {
+                btn.disabled = false;
+                btn.textContent = '📡 Generate Signals';
+                status.textContent = '';
+                location.reload();
+            }, 5000);
+        })
+        .catch(function(err) {
+            status.style.color = 'var(--red)';
+            status.textContent = err.message === 'Invalid code' ? '❌ Invalid code.' : 'Failed to generate signals.';
+            btn.disabled = false;
+            btn.textContent = '📡 Generate Signals';
         });
 }
 

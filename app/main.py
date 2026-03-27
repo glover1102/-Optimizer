@@ -645,6 +645,54 @@ async def health():
     }
 
 
+@app.get("/api/db/status")
+async def api_db_status(code: str = ""):
+    """Return DB availability, table column counts, and schema mismatches."""
+    from app.config import OPTIMIZE_PASSCODE
+    if code != OPTIMIZE_PASSCODE:
+        raise HTTPException(status_code=403, detail="Invalid code")
+
+    from app.database import is_db_available, get_schema_status
+    available = is_db_available()
+    tables: dict = {}
+    if available:
+        try:
+            tables = get_schema_status()
+        except Exception as exc:
+            logger.error("DB status schema check failed: %s", exc)
+
+    return {
+        "db_available": available,
+        "tables": tables,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+class DbMigrateRequest(BaseModel):
+    code: str = ""
+
+
+@app.post("/api/db/migrate")
+async def api_db_migrate(req: DbMigrateRequest):
+    """Re-run schema migration manually (adds missing columns, never drops data)."""
+    from app.config import OPTIMIZE_PASSCODE
+    if req.code != OPTIMIZE_PASSCODE:
+        raise HTTPException(status_code=403, detail="Invalid code")
+
+    from app.database import run_migrations
+    try:
+        executed = run_migrations()
+        return {
+            "status": "ok",
+            "columns_added": len(executed),
+            "statements": executed,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as exc:
+        logger.error("Manual DB migration failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @app.post("/api/discord/test")
 async def test_discord():
     """Send a test message to Discord webhook."""

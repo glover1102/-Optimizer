@@ -155,8 +155,9 @@ async def dashboard(
 
         if not is_db_available():
             return templates.TemplateResponse(
-                "dashboard.html",
-                {
+                request=request,
+                name="dashboard.html",
+                context={
                     "request": request,
                     "results": [],
                     "signals": [],
@@ -188,7 +189,7 @@ async def dashboard(
                 symbols = WATCHLIST.get(asset_class, [])
                 sig_query = sig_query.filter(SignalRecommendation.symbol.in_(symbols))
             raw_signals = sig_query.order_by(SignalRecommendation.created_at.desc()).all()
-            signals = [_signal_to_dict(s) for s in raw_signals]
+            signals = [type("S", (), _signal_to_dict(s))() for s in raw_signals]
         finally:
             db_gen.close()
 
@@ -198,8 +199,9 @@ async def dashboard(
         except Exception:
             status = {"last_run": None, "next_run": None, "running": False}
         return templates.TemplateResponse(
-            "dashboard.html",
-            {
+            request=request,
+            name="dashboard.html",
+            context={
                 "request": request,
                 "results": enriched,
                 "signals": signals,
@@ -211,8 +213,9 @@ async def dashboard(
     except Exception as exc:
         logger.error("Dashboard error: %s", exc)
         return templates.TemplateResponse(
-            "dashboard.html",
-            {
+            request=request,
+            name="dashboard.html",
+            context={
                 "request": request,
                 "results": [],
                 "signals": [],
@@ -253,8 +256,9 @@ async def detail(
         result = None
 
     return templates.TemplateResponse(
-        "detail.html",
-        {
+        request=request,
+        name="detail.html",
+        context={
             "request": request,
             "result": result,
             "symbol": symbol,

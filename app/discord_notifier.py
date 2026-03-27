@@ -213,3 +213,131 @@ def notify_signal(symbol: str, timeframe: str, signal_dict: dict) -> None:
         logger.warning("Discord signal notification failed (network): %s", exc)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Discord signal notification failed: %s", exc)
+
+
+def send_startup_message() -> None:
+    """Send a startup message to Discord to verify webhook connectivity."""
+    webhook_url = os.environ.get("DISCORD_WEBHOOK_URL", "")
+    if not webhook_url:
+        return
+
+    embed = {
+        "title": "🤖 QTAlgo Optimizer Online",
+        "description": "Optimizer is running and Discord notifications are active.",
+        "color": 0x58A6FF,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    payload_data = json.dumps({"embeds": [embed]}).encode("utf-8")
+    req = Request(
+        webhook_url,
+        data=payload_data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urlopen(req, timeout=10) as resp:  # noqa: S310
+        logger.info("Discord startup message sent (HTTP %d)", resp.status)
+
+
+def notify_signal_outcome(signal_dict: dict) -> None:
+    """Send a Discord embed when a signal resolves (TP/SL hit or expired).
+
+    Parameters
+    ----------
+    signal_dict:
+        Dictionary containing signal fields including outcome tracking.
+        Expected keys: symbol, timeframe, action, entry_price, outcome,
+        outcome_price, pnl_percent, highest_tp_hit, created_at, outcome_at.
+    """
+    try:
+        webhook_url = os.environ.get("DISCORD_WEBHOOK_URL", "")
+        if not webhook_url:
+            return
+
+        outcome = signal_dict.get("outcome")
+        if not outcome:
+            return
+
+        symbol = signal_dict.get("symbol", "UNKNOWN")
+        timeframe = signal_dict.get("timeframe", "")
+        action = signal_dict.get("action", "")
+        entry_price = signal_dict.get("entry_price")
+        outcome_price = signal_dict.get("outcome_price")
+        pnl_percent = signal_dict.get("pnl_percent")
+        highest_tp = signal_dict.get("highest_tp_hit", 0)
+        created_at = signal_dict.get("created_at")
+        outcome_at = signal_dict.get("outcome_at")
+
+        # Compute duration string
+        duration_str = "—"
+        if created_at and outcome_at:
+            try:
+                if isinstance(created_at, str):
+                    from datetime import datetime as _dt
+                    created_at = _dt.fromisoformat(created_at)
+                if isinstance(outcome_at, str):
+                    from datetime import datetime as _dt
+                    outcome_at = _dt.fromisoformat(outcome_at)
+                delta = outcome_at - created_at
+                total_mins = int(delta.total_seconds() / 60)
+                if total_mins >= 60:
+                    duration_str = f"{total_mins // 60}h {total_mins % 60}m"
+                else:
+                    duration_str = f"{total_mins}m"
+            except Exception:
+                pass
+
+        def _fmt(v):
+            return f"{v:.6g}" if v is not None else "N/A"
+
+        if outcome == "expired":
+            color = 0x808080
+            title = f"🚫 Signal Expired — {symbol} {timeframe}"
+            description = f"{action} signal expired without hitting TP or SL."
+        elif outcome == "sl_hit":
+            color = 0xFF0000
+            title = f"❌ Stop Loss Hit — {symbol} {timeframe}"
+            description = f"{action} signal stopped out."
+        else:
+            color = 0x00CC44
+            tp_level = outcome.replace("tp", "TP").replace("_hit", "")
+            title = f"🎯 {tp_level} Hit — {symbol} {timeframe}"
+            description = f"{action} signal reached {tp_level}!"
+            if highest_tp and highest_tp > 1:
+                description += f" (Highest TP: {highest_tp})"
+
+        fields = [
+            {"name": "Action", "value": action, "inline": True},
+            {"name": "Entry", "value": _fmt(entry_price), "inline": True},
+            {"name": "Exit", "value": _fmt(outcome_price), "inline": True},
+        ]
+
+        if pnl_percent is not None:
+            pnl_sign = "+" if pnl_percent >= 0 else ""
+            fields.append({"name": "P&L", "value": f"{pnl_sign}{pnl_percent:.2f}%", "inline": True})
+
+        fields.append({"name": "Duration", "value": duration_str, "inline": True})
+
+        embed = {
+            "title": title,
+            "description": description,
+            "color": color,
+            "fields": fields,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        payload = json.dumps({"embeds": [embed]}).encode("utf-8")
+        req = Request(
+            webhook_url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(req, timeout=10) as resp:  # noqa: S310
+            logger.debug(
+                "Discord outcome notification sent for %s %s %s (HTTP %d)",
+                symbol, timeframe, outcome, resp.status,
+            )
+    except (URLError, OSError) as exc:
+        logger.warning("Discord outcome notification failed (network): %s", exc)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Discord outcome notification failed: %s", exc)

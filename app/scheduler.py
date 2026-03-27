@@ -247,7 +247,7 @@ def _run_signal_generation() -> None:
                             from app.discord_notifier import notify_signal
                             notify_signal(symbol, tf, sig)
                         except Exception as exc:
-                            logger.debug("Discord signal notify error: %s", exc)
+                            logger.warning("Discord signal notify error: %s", exc)
 
                 except Exception as exc:
                     logger.error("Signal gen error for %s %s: %s", symbol, tf, exc)
@@ -259,6 +259,164 @@ def _run_signal_generation() -> None:
         db.close()
 
     logger.info("=== Signal generation complete: %d symbol/TF pairs ===", count)
+
+
+def _calc_pnl(action: str, entry: float, exit_price: float) -> float:
+    """Calculate P&L percentage for a signal. Positive = profit."""
+    diff = (exit_price - entry) / entry * 100
+    return diff if action == "BUY" else -diff
+
+
+def _check_signal_outcomes() -> None:
+    """Scheduler callback: check open BUY/SELL signals for TP/SL hits or expiry."""
+    logger.debug("=== Checking signal outcomes ===")
+    try:
+        from app.database import get_session_factory, is_db_available
+        from app.models import SignalRecommendation
+
+        if not is_db_available():
+            return
+
+        factory = get_session_factory()
+        db = factory()
+    except Exception as exc:
+        logger.error("Cannot set up outcome checking: %s", exc)
+        return
+
+    try:
+        now = datetime.now(timezone.utc)
+        # Signals older than 48 hours with no hit are considered invalid/expired
+        expiry_cutoff = now - timedelta(hours=48)
+
+        # Fetch all open (no outcome yet) BUY/SELL signals
+        open_signals = (
+            db.query(SignalRecommendation)
+            .filter(
+                SignalRecommendation.outcome.is_(None),
+                SignalRecommendation.action.in_(["BUY", "SELL"]),
+            )
+            .all()
+        )
+
+        if not open_signals:
+            return
+
+        # Group by symbol to minimise API calls
+        symbol_price: dict[str, Optional[float]] = {}
+
+        for sig in open_signals:
+            symbol = sig.symbol
+            tf = sig.timeframe
+
+            # Fetch current price (lazily, once per symbol)
+            if symbol not in symbol_price:
+                try:
+                    from app.data_fetcher import fetch_ohlcv
+                    df = fetch_ohlcv(symbol, "5m")
+                    if df is not None and not df.empty:
+                        symbol_price[symbol] = float(df["close"].iloc[-1])
+                    else:
+                        symbol_price[symbol] = None
+                except Exception as exc:
+                    logger.warning("Price fetch failed for %s: %s", symbol, exc)
+                    symbol_price[symbol] = None
+
+            current_price = symbol_price[symbol]
+
+            # Check expiry first
+            created_at = sig.created_at
+            if created_at is not None:
+                # Make timezone-aware if naive
+                if created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=timezone.utc)
+                if created_at < expiry_cutoff:
+                    sig.outcome = "expired"
+                    sig.outcome_at = now
+                    sig.outcome_price = current_price
+                    if sig.entry_price and current_price is not None:
+                        sig.pnl_percent = _calc_pnl(sig.action, sig.entry_price, current_price)
+                    try:
+                        db.commit()
+                        from app.discord_notifier import notify_signal_outcome
+                        notify_signal_outcome(_signal_outcome_dict(sig))
+                    except Exception as exc:
+                        logger.warning("Outcome notify/commit failed for %s: %s", symbol, exc)
+                        db.rollback()
+                    continue
+
+            if current_price is None:
+                continue
+
+            action = sig.action
+            entry = sig.entry_price
+            sl = sig.sl_price
+            tp1 = sig.tp1_price
+            tp2 = sig.tp2_price
+            tp3 = sig.tp3_price
+
+            outcome = None
+            outcome_price = current_price
+            highest_tp = sig.highest_tp_hit or 0
+
+            if action == "BUY":
+                if sl is not None and current_price <= sl:
+                    outcome = "sl_hit"
+                elif tp3 is not None and current_price >= tp3:
+                    outcome = "tp3_hit"
+                    highest_tp = max(highest_tp, 3)
+                elif tp2 is not None and current_price >= tp2:
+                    outcome = "tp2_hit"
+                    highest_tp = max(highest_tp, 2)
+                elif tp1 is not None and current_price >= tp1:
+                    outcome = "tp1_hit"
+                    highest_tp = max(highest_tp, 1)
+            elif action == "SELL":
+                if sl is not None and current_price >= sl:
+                    outcome = "sl_hit"
+                elif tp3 is not None and current_price <= tp3:
+                    outcome = "tp3_hit"
+                    highest_tp = max(highest_tp, 3)
+                elif tp2 is not None and current_price <= tp2:
+                    outcome = "tp2_hit"
+                    highest_tp = max(highest_tp, 2)
+                elif tp1 is not None and current_price <= tp1:
+                    outcome = "tp1_hit"
+                    highest_tp = max(highest_tp, 1)
+
+            if outcome:
+                sig.outcome = outcome
+                sig.outcome_at = now
+                sig.outcome_price = outcome_price
+                sig.highest_tp_hit = highest_tp
+                if entry and outcome_price is not None:
+                    sig.pnl_percent = _calc_pnl(action, entry, outcome_price)
+                try:
+                    db.commit()
+                    from app.discord_notifier import notify_signal_outcome
+                    notify_signal_outcome(_signal_outcome_dict(sig))
+                except Exception as exc:
+                    logger.warning("Outcome notify/commit failed for %s: %s", symbol, exc)
+                    db.rollback()
+    except Exception as exc:
+        logger.error("Error in _check_signal_outcomes: %s", exc)
+    finally:
+        db.close()
+
+
+def _signal_outcome_dict(sig) -> dict:
+    """Convert a SignalRecommendation ORM object to a dict for Discord notification."""
+    return {
+        "symbol": sig.symbol,
+        "timeframe": sig.timeframe,
+        "action": sig.action,
+        "entry_price": sig.entry_price,
+        "outcome": sig.outcome,
+        "outcome_price": sig.outcome_price,
+        "pnl_percent": sig.pnl_percent,
+        "highest_tp_hit": sig.highest_tp_hit,
+        "created_at": sig.created_at.isoformat() if sig.created_at else None,
+        "outcome_at": sig.outcome_at.isoformat() if sig.outcome_at else None,
+    }
 
 
 def start_scheduler() -> None:
@@ -280,6 +438,12 @@ def start_scheduler() -> None:
             _run_signal_generation,
             trigger=IntervalTrigger(minutes=SIGNAL_GENERATION_INTERVAL_MINUTES),
             id="signal_generation",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _check_signal_outcomes,
+            trigger=IntervalTrigger(minutes=2),
+            id="signal_outcome_checker",
             replace_existing=True,
         )
         _scheduler.start()

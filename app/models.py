@@ -82,3 +82,10 @@ class SignalRecommendation(Base):
     filters_used = Column(String)                 # JSON string of active filters
     created_at = Column(DateTime, default=func.now())
     is_current = Column(Boolean, default=True)
+
+    # Outcome tracking
+    outcome = Column(String, nullable=True)       # "tp1_hit", "tp2_hit", "tp3_hit", "sl_hit", "expired"
+    outcome_at = Column(DateTime, nullable=True)  # when outcome was determined
+    outcome_price = Column(Float, nullable=True)  # price at outcome
+    highest_tp_hit = Column(Integer, default=0)   # highest TP level hit (0, 1, 2, 3)
+    pnl_percent = Column(Float, nullable=True)    # percentage P&L

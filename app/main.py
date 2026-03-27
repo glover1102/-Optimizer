@@ -51,6 +51,18 @@ async def lifespan(app: FastAPI):
         start_scheduler()
     except Exception as exc:
         logger.error("Scheduler start failed: %s", exc)
+    # Verify Discord webhook connectivity on startup
+    import os as _os
+    _webhook_url = _os.environ.get("DISCORD_WEBHOOK_URL", "")
+    if _webhook_url:
+        logger.info("Discord webhook configured — notifications enabled")
+        try:
+            from app.discord_notifier import send_startup_message
+            send_startup_message()
+        except Exception as exc:
+            logger.warning("Discord startup test failed: %s", exc)
+    else:
+        logger.warning("DISCORD_WEBHOOK_URL not set — Discord notifications DISABLED")
     logger.info("QTAlgo Optimizer started.")
     yield
     try:
@@ -138,6 +150,11 @@ def _signal_to_dict(s) -> dict[str, Any]:
         "filters_used": s.filters_used,
         "created_at": s.created_at.isoformat() if s.created_at else None,
         "is_current": s.is_current,
+        "outcome": s.outcome,
+        "outcome_at": s.outcome_at.isoformat() if s.outcome_at else None,
+        "outcome_price": s.outcome_price,
+        "highest_tp_hit": s.highest_tp_hit,
+        "pnl_percent": s.pnl_percent,
     }
 
 
@@ -568,6 +585,12 @@ async def api_signals_generate(req: SignalGenerateRequest):
             from app.signal_generator import generate_signal
             sig = generate_signal(req.symbol, req.timeframe, req.params)
             _persist_signal(sig, req.symbol, req.timeframe)
+            if sig.get("action") in ("BUY", "SELL"):
+                try:
+                    from app.discord_notifier import notify_signal
+                    notify_signal(req.symbol, req.timeframe, sig)
+                except Exception as exc:
+                    logger.warning("Discord notification failed: %s", exc)
         except Exception as exc:
             logger.error("Manual signal generation failed: %s", exc)
 
@@ -620,3 +643,46 @@ async def health():
         "scheduler_running": status.get("running", False),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+
+@app.post("/api/discord/test")
+async def test_discord():
+    """Send a test message to Discord webhook."""
+    import os
+    webhook_url = os.environ.get("DISCORD_WEBHOOK_URL", "")
+    if not webhook_url:
+        raise HTTPException(status_code=400, detail="DISCORD_WEBHOOK_URL not configured")
+    try:
+        from app.discord_notifier import send_startup_message
+        send_startup_message()
+        return {"status": "sent", "message": "Test message sent to Discord"}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Discord test failed: {exc}")
+
+
+@app.get("/api/signals/history")
+async def api_signals_history():
+    """Get the last 50 resolved signals (where outcome is not None), ordered by outcome_at desc."""
+    try:
+        from app.database import get_db, is_db_available
+        from app.models import SignalRecommendation
+
+        if not is_db_available():
+            return []
+
+        db_gen = get_db()
+        db = next(db_gen)
+        try:
+            signals = (
+                db.query(SignalRecommendation)
+                .filter(SignalRecommendation.outcome.isnot(None))
+                .order_by(SignalRecommendation.outcome_at.desc())
+                .limit(50)
+                .all()
+            )
+            return [_signal_to_dict(s) for s in signals]
+        finally:
+            db_gen.close()
+    except Exception as exc:
+        logger.error("API signals history error: %s", exc)
+        return []

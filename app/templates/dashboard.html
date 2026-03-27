@@ -16,6 +16,14 @@
         <div class="stat-value" style="color: var(--accent);">{{ signals | selectattr('action', 'ne', 'HOLD') | list | length }}</div>
     </div>
     <div class="stat-card">
+        <div class="stat-label">TP Hit Rate</div>
+        {% set resolved = signals | selectattr('outcome', 'defined') | selectattr('outcome', 'ne', None) | list %}
+        {% set tp_hits = resolved | selectattr('outcome', 'ne', 'sl_hit') | selectattr('outcome', 'ne', 'expired') | list %}
+        <div class="stat-value" style="color: var(--green);">
+            {% if resolved | length > 0 %}{{ "%.0f" | format(tp_hits | length / resolved | length * 100) }}%{% else %}—{% endif %}
+        </div>
+    </div>
+    <div class="stat-card">
         <div class="stat-label">Last Run</div>
         <div class="stat-value" style="font-size:13px; padding-top:6px;">{{ last_run or "Not yet run" }}</div>
     </div>
@@ -28,6 +36,7 @@
 <div style="margin-bottom: 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
     <button id="btn-run-all" class="btn btn-primary" onclick="runAllOptimizations()">⚡ Run Full Optimization</button>
     <button id="btn-gen-signals" class="btn btn-primary" style="background: var(--accent);" onclick="generateAllSignals()">📡 Generate Signals</button>
+    <button id="btn-test-discord" class="btn" style="border-color: #5865F2; color: #5865F2;" onclick="testDiscord()">🔔 Test Discord</button>
     <span id="run-all-status" style="font-size: 13px; color: var(--muted);"></span>
 </div>
 
@@ -40,7 +49,8 @@
             <tr>
                 <th>Symbol</th><th>TF</th><th>Signal</th><th>Entry</th>
                 <th>SL</th><th>TP1</th><th>TP2</th><th>TP3</th>
-                <th>Strength</th><th>Conf</th><th>Regime</th><th>Mode</th><th>Updated</th>
+                <th>Strength</th><th>Conf</th><th>Regime</th><th>Mode</th>
+                <th>Alert Given</th><th>Duration</th><th>Status</th>
             </tr>
         </thead>
         <tbody>
@@ -60,6 +70,24 @@
                 <td>{{ s.regime or "—" }}</td>
                 <td>{{ s.entry_mode or "—" }}</td>
                 <td style="color: var(--muted); font-size: 12px;">{{ s.created_at[:16] if s.created_at else "—" }}</td>
+                <td style="color: var(--muted); font-size: 12px;" data-created="{{ s.created_at or '' }}" data-outcome-at="{{ s.outcome_at or '' }}" class="duration-cell">—</td>
+                <td>
+                    {% if s.outcome is none or s.outcome is not defined or s.outcome == '' %}
+                        <span style="color: var(--muted);">⏳ Open</span>
+                    {% elif s.outcome == 'sl_hit' %}
+                        <span style="color: var(--red);">❌ SL</span>
+                    {% elif s.outcome == 'expired' %}
+                        <span style="color: var(--muted);">🚫 Expired</span>
+                    {% elif s.outcome == 'tp3_hit' %}
+                        <span style="color: var(--green);">🎯 TP3</span>
+                    {% elif s.outcome == 'tp2_hit' %}
+                        <span style="color: var(--green);">🎯 TP2</span>
+                    {% elif s.outcome == 'tp1_hit' %}
+                        <span style="color: var(--green);">🎯 TP1</span>
+                    {% else %}
+                        <span style="color: var(--muted);">⏳ Open</span>
+                    {% endif %}
+                </td>
             </tr>
             {% endfor %}
         </tbody>
@@ -162,6 +190,23 @@
     {% endif %}
 </div>
 
+<div class="card" id="signal-history-card">
+    <div class="card-title">📜 Signal History (Last 20 Resolved)</div>
+    <div id="signal-history-loading" style="color: var(--muted); font-size: 13px;">Loading…</div>
+    <div id="signal-history-content" style="display:none;">
+        <table>
+            <thead>
+                <tr>
+                    <th>Symbol</th><th>TF</th><th>Action</th><th>Entry</th>
+                    <th>Exit Price</th><th>P&amp;L %</th><th>Outcome</th><th>Duration</th><th>Resolved At</th>
+                </tr>
+            </thead>
+            <tbody id="signal-history-body"></tbody>
+        </table>
+        <div id="signal-history-empty" style="display:none; text-align:center; padding:30px; color: var(--muted);">No resolved signals yet.</div>
+    </div>
+</div>
+
 <script>
 function runAllOptimizations() {
     var code = prompt('Enter optimization code:');
@@ -238,6 +283,34 @@ function generateAllSignals() {
         });
 }
 
+function testDiscord() {
+    var btn = document.getElementById('btn-test-discord');
+    var status = document.getElementById('run-all-status');
+    btn.disabled = true;
+    btn.textContent = '⏳ Sending...';
+    status.textContent = '';
+    fetch('/api/discord/test', { method: 'POST' })
+        .then(function(r) {
+            if (!r.ok) {
+                return r.json().then(function(d) { throw new Error(d.detail || 'Failed'); });
+            }
+            return r.json();
+        })
+        .then(function(data) {
+            status.style.color = 'var(--green)';
+            status.textContent = '✓ ' + (data.message || 'Discord test sent!');
+        })
+        .catch(function(err) {
+            status.style.color = 'var(--red)';
+            status.textContent = '❌ ' + err.message;
+        })
+        .finally(function() {
+            btn.disabled = false;
+            btn.textContent = '🔔 Test Discord';
+            setTimeout(function() { status.textContent = ''; }, 6000);
+        });
+}
+
 function optimizeSymbol(symbol, timeframe, btn) {
     var code = prompt('Enter optimization code:');
     if (!code) return;
@@ -273,6 +346,100 @@ function optimizeSymbol(symbol, timeframe, btn) {
             setTimeout(function() { btn.style.color = ''; btn.title = ''; }, 3000);
         });
 }
+
+function formatPrice(v) {
+    var n = parseFloat(v);
+    if (isNaN(n)) return '—';
+    if (Math.abs(n) >= 1000) return n.toLocaleString(undefined, {maximumFractionDigits: 2});
+    if (Math.abs(n) >= 1) return n.toFixed(4);
+    return n.toFixed(6);
+}
+
+function formatDuration(createdAt, outcomeAt) {
+    var start = createdAt ? new Date(createdAt) : null;
+    var end = outcomeAt ? new Date(outcomeAt) : null;
+    if (!start || isNaN(start) || !end || isNaN(end)) return '—';
+    var diffMs = end - start;
+    if (diffMs < 0) return '—';
+    var mins = Math.floor(diffMs / 60000);
+    if (mins < 60) return mins + 'm';
+    var hours = Math.floor(mins / 60);
+    var remMins = mins % 60;
+    return hours + 'h ' + remMins + 'm';
+}
+
+function formatLiveDuration(createdAt, outcomeAt) {
+    var start = createdAt ? new Date(createdAt) : null;
+    if (!start || isNaN(start)) return '—';
+    // For open signals (no outcomeAt) use current time; for resolved use outcomeAt
+    var end = outcomeAt ? new Date(outcomeAt) : new Date();
+    if (isNaN(end)) return '—';
+    var diffMs = end - start;
+    if (diffMs < 0) return '—';
+    var mins = Math.floor(diffMs / 60000);
+    if (mins < 60) return mins + 'm';
+    var hours = Math.floor(mins / 60);
+    var remMins = mins % 60;
+    return hours + 'h ' + remMins + 'm';
+}
+
+function outcomeLabel(outcome) {
+    if (!outcome) return '<span style="color:var(--muted)">⏳ Open</span>';
+    if (outcome === 'sl_hit') return '<span style="color:var(--red)">❌ SL</span>';
+    if (outcome === 'expired') return '<span style="color:var(--muted)">🚫 Expired</span>';
+    if (outcome === 'tp3_hit') return '<span style="color:var(--green)">🎯 TP3</span>';
+    if (outcome === 'tp2_hit') return '<span style="color:var(--green)">🎯 TP2</span>';
+    if (outcome === 'tp1_hit') return '<span style="color:var(--green)">🎯 TP1</span>';
+    return '<span style="color:var(--muted)">' + outcome + '</span>';
+}
+
+// Compute live durations for open signals
+document.querySelectorAll('.duration-cell').forEach(function(cell) {
+    var created = cell.getAttribute('data-created');
+    var outcomeAt = cell.getAttribute('data-outcome-at') || null;
+    cell.textContent = formatLiveDuration(created, outcomeAt);
+});
+
+// Load signal history
+fetch('/api/signals/history')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        document.getElementById('signal-history-loading').style.display = 'none';
+        document.getElementById('signal-history-content').style.display = '';
+        var tbody = document.getElementById('signal-history-body');
+        var items = data.slice(0, 20);
+        if (items.length === 0) {
+            document.getElementById('signal-history-empty').style.display = '';
+            return;
+        }
+        items.forEach(function(s) {
+            var pnl = s.pnl_percent !== null && s.pnl_percent !== undefined
+                ? (s.pnl_percent >= 0 ? '+' : '') + s.pnl_percent.toFixed(2) + '%'
+                : '—';
+            var pnlColor = s.pnl_percent > 0 ? 'var(--green)' : (s.pnl_percent < 0 ? 'var(--red)' : 'var(--muted)');
+            var actionColor = s.action === 'BUY' ? 'var(--green)' : 'var(--red)';
+            var duration = formatDuration(s.created_at, s.outcome_at);
+            var resolvedAt = s.outcome_at ? s.outcome_at.slice(0, 16) : '—';
+            var exitPrice = s.outcome_price !== null && s.outcome_price !== undefined ? formatPrice(s.outcome_price) : '—';
+            var entryPrice = s.entry_price !== null && s.entry_price !== undefined ? formatPrice(s.entry_price) : '—';
+            var tr = document.createElement('tr');
+            tr.innerHTML = [
+                '<td><strong>' + s.symbol + '</strong></td>',
+                '<td>' + s.timeframe + '</td>',
+                '<td><span style="color:' + actionColor + ';font-weight:bold">' + s.action + '</span></td>',
+                '<td>' + entryPrice + '</td>',
+                '<td>' + exitPrice + '</td>',
+                '<td style="color:' + pnlColor + '">' + pnl + '</td>',
+                '<td>' + outcomeLabel(s.outcome) + '</td>',
+                '<td style="color:var(--muted);font-size:12px">' + duration + '</td>',
+                '<td style="color:var(--muted);font-size:12px">' + resolvedAt + '</td>',
+            ].join('');
+            tbody.appendChild(tr);
+        });
+    })
+    .catch(function() {
+        document.getElementById('signal-history-loading').textContent = 'Could not load signal history.';
+    });
 </script>
 
 {% endblock %}

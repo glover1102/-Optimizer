@@ -829,10 +829,26 @@ async def api_signals_history():
                 db.query(SignalRecommendation)
                 .filter(SignalRecommendation.outcome.isnot(None))
                 .order_by(SignalRecommendation.outcome_at.desc())
-                .limit(50)
+                .limit(200)
                 .all()
             )
-            return [_signal_to_dict(s) for s in signals]
+            seen = set()
+            unique_signals = []
+            for s in signals:
+                key = (
+                    s.symbol,
+                    s.timeframe,
+                    s.action,
+                    s.outcome,
+                    round(s.entry_price, 4) if s.entry_price else None,
+                    round(s.sl_price, 4) if s.sl_price else None,
+                )
+                if key not in seen:
+                    seen.add(key)
+                    unique_signals.append(s)
+                if len(unique_signals) >= 20:
+                    break
+            return [_signal_to_dict(s) for s in unique_signals]
         finally:
             db_gen.close()
     except Exception as exc:

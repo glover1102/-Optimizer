@@ -45,7 +45,7 @@
     </div>
     <div class="stat-card">
         <div class="stat-label">Top Symbol</div>
-        <div class="stat-value" style="font-size:14px; padding-top:4px;">{{ top_symbol or "—" }}</div>
+        <div class="stat-value" style="font-size:14px; padding-top:4px;">{{ signal_top_symbol or "—" }}</div>
     </div>
     <div class="stat-card">
         <div class="stat-label">Last Run</div>
@@ -81,7 +81,7 @@
                 <th>Symbol</th><th>TF</th><th>Class</th><th>Signal</th><th>Entry</th>
                 <th>SL</th><th>TP1</th><th>TP2</th><th>TP3</th>
                 <th>Strength</th><th>Conf</th><th>Regime</th><th>Mode</th>
-                <th>Filters</th><th>Alert Given</th><th>Duration</th><th>Status</th>
+                <th>Alert Given</th><th>Duration</th><th>Status</th>
             </tr>
         </thead>
         <tbody>
@@ -101,7 +101,6 @@
                 <td>{{ "%.0f" | format(s.confidence * 100) }}%</td>
                 <td>{{ s.regime or "—" }}</td>
                 <td>{{ s.entry_mode or "—" }}</td>
-                <td style="color: var(--muted); font-size: 11px;">{{ s.filters_used or "—" }}</td>
                 <td style="color: var(--muted); font-size: 12px;">{{ s.created_at[:16] if s.created_at else "—" }}</td>
                 <td style="color: var(--muted); font-size: 12px;" data-created="{{ s.created_at or '' }}" data-outcome-at="{{ s.outcome_at or '' }}" class="duration-cell">—</td>
                 <td>
@@ -138,7 +137,7 @@
         <span>Grade A: <strong style="color: var(--green);">{{ grade_a | length }}</strong></span>
         <span>Grade B: <strong style="color: #3498DB;">{{ grade_b | length }}</strong></span>
         <span>Avg Win Rate: <strong>{{ "%.1f" | format(top_results | sum(attribute='win_rate') / (top_results | length) * 100) }}%</strong></span>
-        <span>Best Symbol: <strong style="color: var(--accent);">{{ top_symbol or "—" }}</strong></span>
+        <span>Best Symbol: <strong style="color: var(--accent);">{{ top_picks_symbol or "—" }}</strong></span>
     </div>
     <table>
         <thead>
@@ -413,10 +412,17 @@ function formatDuration(createdAt, outcomeAt) {
 }
 
 function formatLiveDuration(createdAt, outcomeAt) {
-    var start = createdAt ? new Date(createdAt) : null;
-    if (!start || isNaN(start)) return '—';
-    // For open signals (no outcomeAt) use current time; for resolved use outcomeAt
-    var end = outcomeAt ? new Date(outcomeAt) : new Date();
+    if (!createdAt) return '—';
+    // Normalize space-separated datetime to ISO format for cross-browser compatibility
+    var startStr = createdAt.includes('T') ? createdAt : createdAt.replace(' ', 'T');
+    var start = new Date(startStr);
+    if (isNaN(start)) return '—';
+    var end;
+    if (outcomeAt) {
+        end = new Date(outcomeAt.includes('T') ? outcomeAt : outcomeAt.replace(' ', 'T'));
+    } else {
+        end = new Date();
+    }
     if (isNaN(end)) return '—';
     var diffMs = end - start;
     if (diffMs < 0) return '—';
@@ -424,7 +430,10 @@ function formatLiveDuration(createdAt, outcomeAt) {
     if (mins < 60) return mins + 'm';
     var hours = Math.floor(mins / 60);
     var remMins = mins % 60;
-    return hours + 'h ' + remMins + 'm';
+    if (hours < 24) return hours + 'h ' + remMins + 'm';
+    var days = Math.floor(hours / 24);
+    var remHours = hours % 24;
+    return days + 'd ' + remHours + 'h';
 }
 
 function outcomeLabel(outcome) {
@@ -443,6 +452,17 @@ document.querySelectorAll('.duration-cell').forEach(function(cell) {
     var outcomeAt = cell.getAttribute('data-outcome-at') || null;
     cell.textContent = formatLiveDuration(created, outcomeAt);
 });
+
+// Auto-refresh open signal durations every 30 seconds
+setInterval(function() {
+    document.querySelectorAll('.duration-cell').forEach(function(cell) {
+        var outcomeAt = cell.getAttribute('data-outcome-at');
+        if (!outcomeAt) {  // Only refresh open signals
+            var created = cell.getAttribute('data-created');
+            cell.textContent = formatLiveDuration(created, null);
+        }
+    });
+}, 30000);
 
 // Load signal history
 fetch('/api/signals/history')

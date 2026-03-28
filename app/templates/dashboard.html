@@ -49,11 +49,11 @@
     </div>
     <div class="stat-card">
         <div class="stat-label">Last Run</div>
-        <div class="stat-value" style="font-size:13px; padding-top:6px;">{{ last_run or "Not yet run" }}</div>
+        <div class="stat-value" id="stat-last-run" data-ts="{{ last_run or '' }}" style="font-size:13px; padding-top:6px; word-break:break-all;">{{ last_run or "Not yet run" }}</div>
     </div>
     <div class="stat-card">
         <div class="stat-label">Next Run</div>
-        <div class="stat-value" style="font-size:13px; padding-top:6px;">{{ next_run or "—" }}</div>
+        <div class="stat-value" id="stat-next-run" data-ts="{{ next_run or '' }}" style="font-size:13px; padding-top:6px; word-break:break-all;">{{ next_run or "—" }}</div>
     </div>
 </div>
 
@@ -101,7 +101,7 @@
                 <td>{{ "%.0f" | format(s.confidence * 100) }}%</td>
                 <td>{{ s.regime or "—" }}</td>
                 <td>{{ s.entry_mode or "—" }}</td>
-                <td style="color: var(--muted); font-size: 12px;">{{ s.created_at[:16] if s.created_at else "—" }}</td>
+                <td class="alert-given-cell" data-created="{{ s.created_at or '' }}" style="color: var(--muted); font-size: 12px;">{{ s.created_at[:16] if s.created_at else "—" }}</td>
                 <td style="color: var(--muted); font-size: 12px;" data-created="{{ s.created_at or '' }}" data-outcome-at="{{ s.outcome_at or '' }}" class="duration-cell">—</td>
                 <td>
                     {% if s.outcome is none or s.outcome is not defined or s.outcome == '' %}
@@ -453,7 +453,7 @@ document.querySelectorAll('.duration-cell').forEach(function(cell) {
     cell.textContent = formatLiveDuration(created, outcomeAt);
 });
 
-// Auto-refresh open signal durations every 30 seconds
+// Auto-refresh open signal durations every 60 seconds
 setInterval(function() {
     document.querySelectorAll('.duration-cell').forEach(function(cell) {
         var outcomeAt = cell.getAttribute('data-outcome-at');
@@ -462,7 +462,44 @@ setInterval(function() {
             cell.textContent = formatLiveDuration(created, null);
         }
     });
-}, 30000);
+}, 60000);
+
+// Format a raw ISO timestamp to "Mon DD, HH:MM" (UTC)
+function formatTimestamp(isoStr) {
+    if (!isoStr) return null;
+    var s = isoStr.includes('T') ? isoStr : isoStr.replace(' ', 'T');
+    var d = new Date(s);
+    if (isNaN(d)) return null;
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var mon = months[d.getUTCMonth()];
+    var day = d.getUTCDate();
+    var hh = String(d.getUTCHours()).padStart(2, '0');
+    var mm = String(d.getUTCMinutes()).padStart(2, '0');
+    return mon + ' ' + day + ', ' + hh + ':' + mm;
+}
+
+// Format Last Run and Next Run stat cards
+(function() {
+    var lastRunEl = document.getElementById('stat-last-run');
+    if (lastRunEl) {
+        var ts = lastRunEl.getAttribute('data-ts');
+        var fmt = formatTimestamp(ts);
+        if (fmt) lastRunEl.textContent = fmt;
+    }
+    var nextRunEl = document.getElementById('stat-next-run');
+    if (nextRunEl) {
+        var ts2 = nextRunEl.getAttribute('data-ts');
+        var fmt2 = formatTimestamp(ts2);
+        if (fmt2) nextRunEl.textContent = fmt2;
+    }
+})();
+
+// Format "Alert Given" cells
+document.querySelectorAll('.alert-given-cell').forEach(function(cell) {
+    var created = cell.getAttribute('data-created');
+    var fmt = formatTimestamp(created);
+    if (fmt) cell.textContent = fmt;
+});
 
 // Load signal history
 fetch('/api/signals/history')

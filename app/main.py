@@ -647,12 +647,6 @@ async def api_signals_generate(req: SignalGenerateRequest):
             from app.signal_generator import generate_signal
             sig = generate_signal(req.symbol, req.timeframe, req.params)
             _persist_signal(sig, req.symbol, req.timeframe)
-            if sig.get("action") in ("BUY", "SELL"):
-                try:
-                    from app.discord_notifier import notify_signal
-                    notify_signal(req.symbol, req.timeframe, sig)
-                except Exception as exc:
-                    logger.warning("Discord notification failed: %s", exc)
         except Exception as exc:
             logger.error("Manual signal generation failed: %s", exc)
 

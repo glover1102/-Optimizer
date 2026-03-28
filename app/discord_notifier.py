@@ -17,6 +17,15 @@ from urllib.request import Request, urlopen
 
 logger = logging.getLogger(__name__)
 
+
+def _get_webhook_url() -> str:
+    """Get the Discord webhook URL, preferring DISCORD_WEBHOOK_OPTIMIZER."""
+    url = os.environ.get("DISCORD_WEBHOOK_OPTIMIZER", "")
+    if not url:
+        url = os.environ.get("DISCORD_WEBHOOK_URL", "")
+    return url
+
+
 _GRADE_COLOR = {
     "A": 0x00FF00,   # green
     "B": 0x3498DB,   # blue
@@ -40,9 +49,9 @@ def notify_optimization_result(result_dict: dict) -> None:
         atr_multiplier, atr_period, regime, walk_forward_score.
     """
     try:
-        webhook_url = os.environ.get("DISCORD_WEBHOOK_URL", "")
+        webhook_url = _get_webhook_url()
         if not webhook_url:
-            logger.debug("DISCORD_WEBHOOK_URL not set — skipping notification")
+            logger.debug("No Discord webhook URL configured — skipping notification")
             return
 
         grade = result_dict.get("confidence_grade", "")
@@ -152,7 +161,7 @@ def notify_signal(symbol: str, timeframe: str, signal_dict: dict) -> None:
         Signal dict as returned by signal_generator.generate_signal().
     """
     try:
-        webhook_url = os.environ.get("DISCORD_WEBHOOK_URL", "")
+        webhook_url = _get_webhook_url()
         if not webhook_url:
             return
 
@@ -217,7 +226,7 @@ def notify_signal(symbol: str, timeframe: str, signal_dict: dict) -> None:
 
 def send_startup_message() -> None:
     """Send a startup message to Discord to verify webhook connectivity."""
-    webhook_url = os.environ.get("DISCORD_WEBHOOK_URL", "")
+    webhook_url = _get_webhook_url()
     if not webhook_url:
         return
 
@@ -249,7 +258,7 @@ def notify_signal_outcome(signal_dict: dict) -> None:
         outcome_price, pnl_percent, highest_tp_hit, created_at, outcome_at.
     """
     try:
-        webhook_url = os.environ.get("DISCORD_WEBHOOK_URL", "")
+        webhook_url = _get_webhook_url()
         if not webhook_url:
             return
 

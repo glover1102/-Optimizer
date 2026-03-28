@@ -16,12 +16,36 @@
         <div class="stat-value" style="color: var(--accent);">{{ signals | selectattr('action', 'ne', 'HOLD') | list | length }}</div>
     </div>
     <div class="stat-card">
-        <div class="stat-label">TP Hit Rate</div>
-        {% set resolved = signals | selectattr('outcome', 'defined') | selectattr('outcome', 'ne', None) | list %}
-        {% set tp_hits = resolved | selectattr('outcome', 'ne', 'sl_hit') | selectattr('outcome', 'ne', 'expired') | list %}
+        <div class="stat-label">TP1 Hit Rate</div>
         <div class="stat-value" style="color: var(--green);">
-            {% if resolved | length > 0 %}{{ "%.0f" | format(tp_hits | length / resolved | length * 100) }}%{% else %}—{% endif %}
+            {% if signal_stats.get('resolved_count', 0) > 0 %}{{ "%.0f" | format(signal_stats.get('tp1_hits', 0) / signal_stats['resolved_count'] * 100) }}%{% else %}—{% endif %}
         </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">TP2 Hit Rate</div>
+        <div class="stat-value" style="color: var(--green);">
+            {% if signal_stats.get('resolved_count', 0) > 0 %}{{ "%.0f" | format(signal_stats.get('tp2_hits', 0) / signal_stats['resolved_count'] * 100) }}%{% else %}—{% endif %}
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">TP3 Hit Rate</div>
+        <div class="stat-value" style="color: var(--green);">
+            {% if signal_stats.get('resolved_count', 0) > 0 %}{{ "%.0f" | format(signal_stats.get('tp3_hits', 0) / signal_stats['resolved_count'] * 100) }}%{% else %}—{% endif %}
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">SL Hit Rate</div>
+        <div class="stat-value" style="color: var(--red);">
+            {% if signal_stats.get('resolved_count', 0) > 0 %}{{ "%.0f" | format(signal_stats.get('sl_hits', 0) / signal_stats['resolved_count'] * 100) }}%{% else %}—{% endif %}
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Open Signals</div>
+        <div class="stat-value" style="color: var(--muted);">{{ signal_stats.get('open_count', 0) }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Top Symbol</div>
+        <div class="stat-value" style="font-size:14px; padding-top:4px;">{{ top_symbol or "—" }}</div>
     </div>
     <div class="stat-card">
         <div class="stat-label">Last Run</div>
@@ -44,13 +68,20 @@
 {% if active_signals %}
 <div class="card">
     <div class="card-title">📡 Current Signal Recommendations</div>
+    <div style="margin-bottom: 12px; padding: 8px 12px; background: var(--card-bg, rgba(255,255,255,0.04)); border-radius: 6px; font-size: 13px; color: var(--muted); display: flex; gap: 18px; flex-wrap: wrap;">
+        <span>Total active: <strong style="color: var(--accent);">{{ active_signals | length }}</strong></span>
+        <span>BUY: <strong style="color: var(--green);">{{ signal_stats.get('buy_count', 0) }}</strong></span>
+        <span>SELL: <strong style="color: var(--red);">{{ signal_stats.get('sell_count', 0) }}</strong></span>
+        <span>Avg Confidence: <strong>{{ "%.0f" | format(signal_stats.get('avg_confidence', 0) * 100) }}%</strong></span>
+        <span>⚡ Confluence: <strong>{{ signal_stats.get('confluence_count', 0) }}</strong></span>
+    </div>
     <table>
         <thead>
             <tr>
-                <th>Symbol</th><th>TF</th><th>Signal</th><th>Entry</th>
+                <th>Symbol</th><th>TF</th><th>Class</th><th>Signal</th><th>Entry</th>
                 <th>SL</th><th>TP1</th><th>TP2</th><th>TP3</th>
                 <th>Strength</th><th>Conf</th><th>Regime</th><th>Mode</th>
-                <th>Alert Given</th><th>Duration</th><th>Status</th>
+                <th>Filters</th><th>Alert Given</th><th>Duration</th><th>Status</th>
             </tr>
         </thead>
         <tbody>
@@ -59,16 +90,18 @@
             <tr>
                 <td><strong>{{ s.symbol }}</strong></td>
                 <td>{{ s.timeframe }}</td>
+                <td><span class="badge badge-{{ s.asset_class }}">{{ s.asset_class }}</span></td>
                 <td><span style="color: {{ action_color }}; font-weight: bold;">{{ s.action }}</span>{% if s.is_confluence %} <span title="Confluence signal">⚡</span>{% endif %}</td>
                 <td>{{ "%.5g" | format(s.entry_price) if s.entry_price else "—" }}</td>
                 <td style="color: var(--red);">{{ "%.5g" | format(s.sl_price) if s.sl_price else "—" }}</td>
                 <td style="color: var(--green);">{{ "%.5g" | format(s.tp1_price) if s.tp1_price else "—" }}</td>
                 <td style="color: var(--green);">{{ "%.5g" | format(s.tp2_price) if s.tp2_price else "—" }}</td>
                 <td style="color: var(--green);">{{ "%.5g" | format(s.tp3_price) if s.tp3_price else "—" }}</td>
-                <td>{{ s.strength }}/4</td>
+                <td>{% if s.strength == 4 %}<strong style="color: var(--accent);">{{ s.strength }}/4</strong>{% else %}{{ s.strength }}/4{% endif %}</td>
                 <td>{{ "%.0f" | format(s.confidence * 100) }}%</td>
                 <td>{{ s.regime or "—" }}</td>
                 <td>{{ s.entry_mode or "—" }}</td>
+                <td style="color: var(--muted); font-size: 11px;">{{ s.filters_used or "—" }}</td>
                 <td style="color: var(--muted); font-size: 12px;">{{ s.created_at[:16] if s.created_at else "—" }}</td>
                 <td style="color: var(--muted); font-size: 12px;" data-created="{{ s.created_at or '' }}" data-outcome-at="{{ s.outcome_at or '' }}" class="duration-cell">—</td>
                 <td>
@@ -99,13 +132,21 @@
 {% if top_results %}
 <div class="card">
     <div class="card-title">🟢 Top Picks (Grade A &amp; B)</div>
+    {% set grade_a = top_results | selectattr('confidence_grade', 'equalto', 'A') | list %}
+    {% set grade_b = top_results | selectattr('confidence_grade', 'equalto', 'B') | list %}
+    <div style="margin-bottom: 12px; padding: 8px 12px; background: var(--card-bg, rgba(255,255,255,0.04)); border-radius: 6px; font-size: 13px; color: var(--muted); display: flex; gap: 18px; flex-wrap: wrap;">
+        <span>Grade A: <strong style="color: var(--green);">{{ grade_a | length }}</strong></span>
+        <span>Grade B: <strong style="color: #3498DB;">{{ grade_b | length }}</strong></span>
+        <span>Avg Win Rate: <strong>{{ "%.1f" | format(top_results | sum(attribute='win_rate') / (top_results | length) * 100) }}%</strong></span>
+        <span>Best Symbol: <strong style="color: var(--accent);">{{ top_symbol or "—" }}</strong></span>
+    </div>
     <table>
         <thead>
             <tr>
                 <th>Symbol</th><th>TF</th><th>Class</th>
                 <th>LB / RB</th><th>Offset</th><th>Mult</th><th>ATR Per</th>
-                <th>Win%</th><th>TP2%</th><th>SL%</th>
-                <th>Score</th><th>Grade</th><th>Regime</th><th></th>
+                <th>Signals</th><th>Win%</th><th>TP2%</th><th>SL%</th>
+                <th>Consistency</th><th>Score</th><th>Grade</th><th>Regime</th><th>Current</th><th></th>
             </tr>
         </thead>
         <tbody>
@@ -118,12 +159,15 @@
                 <td>{{ "%.2f" | format(r.offset) }}</td>
                 <td>{{ "%.2f" | format(r.atr_multiplier) }}</td>
                 <td>{{ r.atr_period }}</td>
+                <td>{{ r.total_signals }}</td>
                 <td>{{ "%.1f" | format(r.win_rate * 100) }}%</td>
                 <td>{{ "%.1f" | format(r.tp2_rate * 100) }}%</td>
                 <td>{{ "%.1f" | format(r.sl_rate * 100) }}%</td>
+                <td>{{ "%.1f" | format(r.consistency_score) if r.consistency_score is not none else "—" }}</td>
                 <td>{{ "%.1f" | format(r.confidence_score) }}</td>
                 <td><span class="grade grade-{{ r.confidence_grade }}">{{ r.confidence_grade }}</span></td>
                 <td><span class="regime-{{ r.regime }}">{{ r.regime }}</span></td>
+                <td>{% if r.is_current %}<span style="color: var(--green);">✓</span>{% else %}<span style="color: var(--muted);">—</span>{% endif %}</td>
                 <td><button class="btn" style="font-size:11px; padding:3px 8px;" onclick="optimizeSymbol('{{ r.symbol }}', '{{ r.timeframe }}', this)">Optimize</button></td>
             </tr>
             {% endfor %}

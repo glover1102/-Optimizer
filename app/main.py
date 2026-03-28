@@ -55,7 +55,7 @@ async def lifespan(app: FastAPI):
         logger.error("Scheduler start failed: %s", exc)
     # Verify Discord webhook connectivity on startup
     import os as _os
-    _webhook_url = _os.environ.get("DISCORD_WEBHOOK_URL", "")
+    _webhook_url = _os.environ.get("DISCORD_WEBHOOK_OPTIMIZER", "") or _os.environ.get("DISCORD_WEBHOOK_URL", "")
     if _webhook_url:
         logger.info("Discord webhook configured — notifications enabled")
         try:
@@ -64,7 +64,7 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             logger.warning("Discord startup test failed: %s", exc)
     else:
-        logger.warning("DISCORD_WEBHOOK_URL not set — Discord notifications DISABLED")
+        logger.warning("No Discord webhook URL set (DISCORD_WEBHOOK_OPTIMIZER or DISCORD_WEBHOOK_URL) — Discord notifications DISABLED")
     logger.info("QTAlgo Optimizer started.")
     yield
     try:
@@ -138,6 +138,7 @@ def _signal_to_dict(s) -> dict[str, Any]:
         "id": s.id,
         "symbol": s.symbol,
         "timeframe": s.timeframe,
+        "asset_class": _asset_class(s.symbol),
         "action": s.action,
         "strength": s.strength,
         "entry_price": s.entry_price,
@@ -183,6 +184,8 @@ async def dashboard(
                     "selected_class": asset_class,
                     "last_run": None,
                     "next_run": None,
+                    "signal_stats": {},
+                    "top_symbol": "",
                 },
             )
 
@@ -217,6 +220,43 @@ async def dashboard(
             status = get_scheduler_status()
         except Exception:
             status = {"last_run": None, "next_run": None, "running": False}
+
+        # Compute enhanced signal stats for dashboard stat cards
+        all_signals_list = [_signal_to_dict(s) for s in raw_signals]
+        resolved = [s for s in all_signals_list if s.get("outcome")]
+        tp1_hits = sum(1 for s in resolved if s["outcome"] in ("tp1_hit", "tp2_hit", "tp3_hit"))
+        tp2_hits = sum(1 for s in resolved if s["outcome"] in ("tp2_hit", "tp3_hit"))
+        tp3_hits = sum(1 for s in resolved if s["outcome"] == "tp3_hit")
+        sl_hits = sum(1 for s in resolved if s["outcome"] == "sl_hit")
+        open_count = sum(1 for s in all_signals_list if not s.get("outcome"))
+        buy_count = sum(1 for s in all_signals_list if s["action"] == "BUY")
+        sell_count = sum(1 for s in all_signals_list if s["action"] == "SELL")
+        confluence_count = sum(1 for s in all_signals_list if s.get("is_confluence"))
+        active_list = [s for s in all_signals_list if s["action"] != "HOLD"]
+        avg_confidence = (
+            sum(s.get("confidence") or 0 for s in active_list) / len(active_list)
+            if active_list else 0.0
+        )
+
+        # Top symbol by win rate from optimization results
+        top_symbol = ""
+        if enriched:
+            best = max(enriched, key=lambda r: (r.win_rate or 0))
+            top_symbol = best.symbol
+
+        signal_stats = {
+            "resolved_count": len(resolved),
+            "tp1_hits": tp1_hits,
+            "tp2_hits": tp2_hits,
+            "tp3_hits": tp3_hits,
+            "sl_hits": sl_hits,
+            "open_count": open_count,
+            "buy_count": buy_count,
+            "sell_count": sell_count,
+            "confluence_count": confluence_count,
+            "avg_confidence": avg_confidence,
+        }
+
         return templates.TemplateResponse(
             request=request,
             name="dashboard.html",
@@ -227,6 +267,8 @@ async def dashboard(
                 "selected_class": asset_class,
                 "last_run": status["last_run"],
                 "next_run": status["next_run"],
+                "signal_stats": signal_stats,
+                "top_symbol": top_symbol,
             },
         )
     except Exception as exc:
@@ -241,6 +283,8 @@ async def dashboard(
                 "selected_class": asset_class,
                 "last_run": None,
                 "next_run": None,
+                "signal_stats": {},
+                "top_symbol": "",
             },
         )
 
@@ -650,10 +694,10 @@ async def health():
 @app.post("/api/discord/test")
 async def test_discord():
     """Send a test message to Discord webhook."""
-    import os
-    webhook_url = os.environ.get("DISCORD_WEBHOOK_URL", "")
+    from app.discord_notifier import _get_webhook_url
+    webhook_url = _get_webhook_url()
     if not webhook_url:
-        raise HTTPException(status_code=400, detail="DISCORD_WEBHOOK_URL not configured")
+        raise HTTPException(status_code=400, detail="No Discord webhook URL configured (set DISCORD_WEBHOOK_OPTIMIZER or DISCORD_WEBHOOK_URL)")
     try:
         from app.discord_notifier import send_startup_message
         send_startup_message()

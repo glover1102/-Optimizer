@@ -130,6 +130,25 @@
 </div>
 {% endif %}
 
+<div class="card" id="signal-history-card">
+    <div class="card-title">📜 Signal History (Last 20 Resolved)</div>
+    <div id="signal-history-loading" style="color: var(--muted); font-size: 13px;">Loading…</div>
+    <div id="signal-history-content" style="display:none;">
+        <div class="table-responsive">
+        <table>
+            <thead>
+                <tr>
+                    <th>Symbol</th><th>TF</th><th>Action</th><th>Entry</th>
+                    <th>Exit Price</th><th>P&amp;L %</th><th>Outcome</th><th>Duration</th><th>Resolved At</th>
+                </tr>
+            </thead>
+            <tbody id="signal-history-body"></tbody>
+        </table>
+        </div>
+        <div id="signal-history-empty" style="display:none; text-align:center; padding:30px; color: var(--muted);">No resolved signals yet.</div>
+    </div>
+</div>
+
 {% set top_results = results | selectattr('confidence_grade', 'in', ['A', 'B']) | list %}
 {% if top_results %}
 <div class="card">
@@ -238,25 +257,6 @@
         <code style="color: var(--accent);">POST /api/optimize {"symbol": "BTCUSDT", "timeframe": "1h"}</code>
     </div>
     {% endif %}
-</div>
-
-<div class="card" id="signal-history-card">
-    <div class="card-title">📜 Signal History (Last 20 Resolved)</div>
-    <div id="signal-history-loading" style="color: var(--muted); font-size: 13px;">Loading…</div>
-    <div id="signal-history-content" style="display:none;">
-        <div class="table-responsive">
-        <table>
-            <thead>
-                <tr>
-                    <th>Symbol</th><th>TF</th><th>Action</th><th>Entry</th>
-                    <th>Exit Price</th><th>P&amp;L %</th><th>Outcome</th><th>Duration</th><th>Resolved At</th>
-                </tr>
-            </thead>
-            <tbody id="signal-history-body"></tbody>
-        </table>
-        </div>
-        <div id="signal-history-empty" style="display:none; text-align:center; padding:30px; color: var(--muted);">No resolved signals yet.</div>
-    </div>
 </div>
 
 <script>

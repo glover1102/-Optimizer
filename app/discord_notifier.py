@@ -26,6 +26,25 @@ def _get_webhook_url() -> str:
     return url
 
 
+_USER_AGENT = "QTAlgo-Optimizer/1.0 (https://github.com/glover1102/-Optimizer)"
+
+
+def _make_discord_request(url: str, payload: dict) -> int:
+    """Send a payload to a Discord webhook URL with proper headers. Returns HTTP status code."""
+    data = json.dumps(payload).encode("utf-8")
+    req = Request(
+        url,
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": _USER_AGENT,
+        },
+        method="POST",
+    )
+    with urlopen(req, timeout=10) as resp:  # noqa: S310
+        return resp.status
+
+
 _GRADE_COLOR = {
     "A": 0x00FF00,   # green
     "B": 0x3498DB,   # blue
@@ -130,18 +149,11 @@ def notify_optimization_result(result_dict: dict) -> None:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-        payload = json.dumps({"embeds": [embed]}).encode("utf-8")
-        req = Request(
-            webhook_url,
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
+        status = _make_discord_request(webhook_url, {"embeds": [embed]})
+        logger.debug(
+            "Discord notification sent for %s %s (HTTP %d)",
+            symbol, timeframe, status,
         )
-        with urlopen(req, timeout=10) as resp:  # noqa: S310
-            logger.debug(
-                "Discord notification sent for %s %s (HTTP %d)",
-                symbol, timeframe, resp.status,
-            )
     except (URLError, OSError) as exc:
         logger.warning("Discord notification failed (network): %s", exc)
     except Exception as exc:  # noqa: BLE001
@@ -206,18 +218,11 @@ def notify_signal(symbol: str, timeframe: str, signal_dict: dict) -> None:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-        payload = json.dumps({"embeds": [embed]}).encode("utf-8")
-        req = Request(
-            webhook_url,
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
+        status = _make_discord_request(webhook_url, {"embeds": [embed]})
+        logger.debug(
+            "Discord signal notification sent for %s %s (HTTP %d)",
+            symbol, timeframe, status,
         )
-        with urlopen(req, timeout=10) as resp:  # noqa: S310
-            logger.debug(
-                "Discord signal notification sent for %s %s (HTTP %d)",
-                symbol, timeframe, resp.status,
-            )
     except (URLError, OSError) as exc:
         logger.warning("Discord signal notification failed (network): %s", exc)
     except Exception as exc:  # noqa: BLE001
@@ -236,15 +241,8 @@ def send_startup_message() -> None:
         "color": 0x58A6FF,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
-    payload_data = json.dumps({"embeds": [embed]}).encode("utf-8")
-    req = Request(
-        webhook_url,
-        data=payload_data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urlopen(req, timeout=10) as resp:  # noqa: S310
-        logger.info("Discord startup message sent (HTTP %d)", resp.status)
+    status = _make_discord_request(webhook_url, {"embeds": [embed]})
+    logger.info("Discord startup message sent (HTTP %d)", status)
 
 
 def notify_signal_outcome(signal_dict: dict) -> None:
@@ -334,18 +332,11 @@ def notify_signal_outcome(signal_dict: dict) -> None:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-        payload = json.dumps({"embeds": [embed]}).encode("utf-8")
-        req = Request(
-            webhook_url,
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
+        status = _make_discord_request(webhook_url, {"embeds": [embed]})
+        logger.debug(
+            "Discord outcome notification sent for %s %s %s (HTTP %d)",
+            symbol, timeframe, outcome, status,
         )
-        with urlopen(req, timeout=10) as resp:  # noqa: S310
-            logger.debug(
-                "Discord outcome notification sent for %s %s %s (HTTP %d)",
-                symbol, timeframe, outcome, resp.status,
-            )
     except (URLError, OSError) as exc:
         logger.warning("Discord outcome notification failed (network): %s", exc)
     except Exception as exc:  # noqa: BLE001

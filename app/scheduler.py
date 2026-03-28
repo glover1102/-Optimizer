@@ -206,11 +206,26 @@ def _run_signal_generation() -> None:
         logger.error("Cannot set up signal generation: %s", exc)
         return
 
+    skipped_duplicates = 0
     try:
+        from app.signal_dedup import is_duplicate_signal
+
         for symbol in all_symbols:
             for tf in TIMEFRAMES:
                 try:
                     sig = generate_signal(symbol, tf)
+
+                    # Deduplication check — runs before marking old rows so the
+                    # most-recent record is still accessible with its current state.
+                    if is_duplicate_signal(db, symbol, tf, sig):
+                        # Commit the in-memory is_current refresh set by the helper.
+                        try:
+                            db.commit()
+                        except Exception:
+                            db.rollback()
+                        skipped_duplicates += 1
+                        continue
+
                     # Mark old signals as not current
                     db.execute(
                         update(SignalRecommendation)
@@ -241,7 +256,7 @@ def _run_signal_generation() -> None:
                     db.commit()
                     count += 1
 
-                    # Discord notification for BUY/SELL signals
+                    # Discord/Pushover notification for BUY/SELL signals
                     if sig.get("action") in ("BUY", "SELL"):
                         try:
                             from app.discord_notifier import notify_signal
@@ -258,7 +273,11 @@ def _run_signal_generation() -> None:
     finally:
         db.close()
 
-    logger.info("=== Signal generation complete: %d symbol/TF pairs ===", count)
+    logger.info(
+        "=== Signal generation complete: %d new, %d skipped (duplicates) ===",
+        count,
+        skipped_duplicates,
+    )
 
 
 def _calc_pnl(action: str, entry: float, exit_price: float) -> float:

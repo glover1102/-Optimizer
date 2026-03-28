@@ -477,19 +477,35 @@ class TVWebhookPayload(BaseModel):
     message: Optional[str] = None
 
 
-def _persist_signal(sig: dict, symbol: str, timeframe: str) -> None:
-    """Store a signal recommendation in the database (best-effort)."""
+def _persist_signal(sig: dict, symbol: str, timeframe: str) -> bool:
+    """Store a signal recommendation in the database (best-effort).
+
+    Returns True if a new row was inserted (i.e. the signal is not a
+    duplicate), False if the signal was skipped or an error occurred.
+    Callers should only fire notifications when this function returns True.
+    """
     try:
         from app.database import get_db, is_db_available
         from app.models import SignalRecommendation
+        from app.signal_dedup import is_duplicate_signal
         from sqlalchemy import update
 
         if not is_db_available():
-            return
+            return False
 
         db_gen = get_db()
         db = next(db_gen)
         try:
+            # Deduplication check before inserting a new row or notifying
+            if is_duplicate_signal(db, symbol, timeframe, sig):
+                # Commit the is_current refresh that is_duplicate_signal set
+                # in-memory, then skip the insert and notification.
+                try:
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                return False
+
             db.execute(
                 update(SignalRecommendation)
                 .where(
@@ -517,13 +533,16 @@ def _persist_signal(sig: dict, symbol: str, timeframe: str) -> None:
             )
             db.add(record)
             db.commit()
+            return True
         except Exception as exc:
             db.rollback()
             logger.warning("Signal DB persist failed: %s", exc)
+            return False
         finally:
             db_gen.close()
     except Exception as exc:
         logger.warning("Signal persist error: %s", exc)
+        return False
 
 
 @app.post("/api/webhook/tv")
@@ -553,12 +572,13 @@ async def webhook_tradingview(payload: TVWebhookPayload):
         }
 
         def _bg():
-            _persist_signal(sig, payload.symbol, payload.timeframe or "1h")
-            try:
-                from app.discord_notifier import notify_signal
-                notify_signal(payload.symbol, payload.timeframe or "1h", sig)
-            except Exception:
-                pass
+            inserted = _persist_signal(sig, payload.symbol, payload.timeframe or "1h")
+            if inserted:
+                try:
+                    from app.discord_notifier import notify_signal
+                    notify_signal(payload.symbol, payload.timeframe or "1h", sig)
+                except Exception:
+                    pass
 
         threading.Thread(target=_bg, daemon=True).start()
 

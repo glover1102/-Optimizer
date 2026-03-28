@@ -21,7 +21,7 @@ OPTIMIZE_PASSCODE: str = os.getenv("OPTIMIZE_PASSCODE", "96541230")
 
 # Signal generation config
 SIGNAL_GENERATION_INTERVAL_MINUTES: int = int(os.getenv("SIGNAL_INTERVAL", "15"))
-DEFAULT_ENTRY_MODE: str = os.getenv("DEFAULT_ENTRY_MODE", "Pivot")
+DEFAULT_ENTRY_MODE: str = os.getenv("DEFAULT_ENTRY_MODE", "Hybrid")
 
 DEFAULT_SIGNAL_PARAMS: dict = {
     "left_bars": 10,
@@ -45,7 +45,7 @@ DEFAULT_SIGNAL_PARAMS: dict = {
     "wt_os_level": -60,
     "use_ema_trend_filter": False,
     "ema_trend_period": 300,
-    "use_golden_line": False,
+    "use_golden_line": True,
     "gl_w1": 1.0,
     "gl_w2": 1.0,
     "gl_w3": 1.0,
@@ -53,7 +53,7 @@ DEFAULT_SIGNAL_PARAMS: dict = {
     "gl_ema1_period": 9,
     "gl_ema2_period": 50,
     "use_price_position_filter": False,
-    "entry_mode": "Pivot",
+    "entry_mode": DEFAULT_ENTRY_MODE,
     "use_rr_targets": False,
     "rr_tp1": 1.0,
     "rr_tp2": 2.0,

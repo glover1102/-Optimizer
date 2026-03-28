@@ -47,13 +47,13 @@
         <div class="stat-label">Top Symbol</div>
         <div class="stat-value" style="font-size:14px; padding-top:4px;">{{ signal_top_symbol or "—" }}</div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card" style="min-width:160px;">
         <div class="stat-label">Last Run</div>
-        <div class="stat-value" style="font-size:13px; padding-top:6px;">{{ last_run or "Not yet run" }}</div>
+        <div class="stat-value" id="stat-last-run" style="font-size:13px; padding-top:6px; word-break:break-word; overflow-wrap:break-word;" data-iso="{{ last_run or '' }}">{{ last_run or "Not yet run" }}</div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card" style="min-width:160px;">
         <div class="stat-label">Next Run</div>
-        <div class="stat-value" style="font-size:13px; padding-top:6px;">{{ next_run or "—" }}</div>
+        <div class="stat-value" id="stat-next-run" style="font-size:13px; padding-top:6px; word-break:break-word; overflow-wrap:break-word;" data-iso="{{ next_run or '' }}">{{ next_run or "—" }}</div>
     </div>
 </div>
 
@@ -101,7 +101,7 @@
                 <td>{{ "%.0f" | format(s.confidence * 100) }}%</td>
                 <td>{{ s.regime or "—" }}</td>
                 <td>{{ s.entry_mode or "—" }}</td>
-                <td style="color: var(--muted); font-size: 12px;">{{ s.created_at[:16] if s.created_at else "—" }}</td>
+                <td class="alert-given-cell" style="color: var(--muted); font-size: 12px;" data-iso="{{ s.created_at or '' }}">{{ s.created_at[:16] if s.created_at else "—" }}</td>
                 <td style="color: var(--muted); font-size: 12px;" data-created="{{ s.created_at or '' }}" data-outcome-at="{{ s.outcome_at or '' }}" class="duration-cell">—</td>
                 <td>
                     {% if s.outcome is none or s.outcome is not defined or s.outcome == '' %}
@@ -251,6 +251,42 @@
 </div>
 
 <script>
+// Shared helper: format ISO datetime string to "Mon DD, HH:MM"
+function formatISODatetime(iso) {
+    if (!iso) return iso;
+    // Normalize space separator and truncate to at most 3 fractional digits for cross-browser compatibility
+    var str = iso.includes('T') ? iso : iso.replace(' ', 'T');
+    str = str.replace(/(\.\d{1,3})\d*/, '$1');
+    var d = new Date(str);
+    if (isNaN(d)) return iso.slice(0, 16).replace('T', ' ');
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var mon = months[d.getMonth()];
+    var day = String(d.getDate()).padStart(2, '0');
+    var h = String(d.getHours()).padStart(2, '0');
+    var m = String(d.getMinutes()).padStart(2, '0');
+    return mon + ' ' + day + ', ' + h + ':' + m;
+}
+
+// Format Last Run and Next Run stat cards
+(function() {
+    var lastRunEl = document.getElementById('stat-last-run');
+    if (lastRunEl) {
+        var iso = lastRunEl.getAttribute('data-iso');
+        if (iso) lastRunEl.textContent = formatISODatetime(iso);
+    }
+    var nextRunEl = document.getElementById('stat-next-run');
+    if (nextRunEl) {
+        var iso = nextRunEl.getAttribute('data-iso');
+        if (iso) nextRunEl.textContent = formatISODatetime(iso);
+    }
+})();
+
+// Format Alert Given cells
+document.querySelectorAll('.alert-given-cell').forEach(function(cell) {
+    var iso = cell.getAttribute('data-iso');
+    if (iso) cell.textContent = formatISODatetime(iso);
+});
+
 function runAllOptimizations() {
     var code = prompt('Enter optimization code:');
     if (!code) return;
@@ -413,13 +449,17 @@ function formatDuration(createdAt, outcomeAt) {
 
 function formatLiveDuration(createdAt, outcomeAt) {
     if (!createdAt) return '—';
-    // Normalize space-separated datetime to ISO format for cross-browser compatibility
+    // Normalize space-separated datetime to ISO and truncate to at most 3 fractional digits
+    // for cross-browser compatibility (especially Safari)
     var startStr = createdAt.includes('T') ? createdAt : createdAt.replace(' ', 'T');
+    startStr = startStr.replace(/(\.\d{1,3})\d*/, '$1');
     var start = new Date(startStr);
     if (isNaN(start)) return '—';
     var end;
     if (outcomeAt) {
-        end = new Date(outcomeAt.includes('T') ? outcomeAt : outcomeAt.replace(' ', 'T'));
+        var endStr = outcomeAt.includes('T') ? outcomeAt : outcomeAt.replace(' ', 'T');
+        endStr = endStr.replace(/(\.\d{1,3})\d*/, '$1');
+        end = new Date(endStr);
     } else {
         end = new Date();
     }

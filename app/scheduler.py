@@ -194,7 +194,7 @@ def _run_signal_generation() -> None:
         from app.database import get_session_factory, is_db_available
         from app.models import SignalRecommendation
         from app.signal_generator import generate_signal
-        from sqlalchemy import update
+        from sqlalchemy import select, update
 
         if not is_db_available():
             logger.warning("DB not available for signal generation — skipping")
@@ -211,6 +211,19 @@ def _run_signal_generation() -> None:
             for tf in TIMEFRAMES:
                 try:
                     sig = generate_signal(symbol, tf)
+
+                    # Check previous current signal action to avoid duplicate notifications
+                    prev_row = db.execute(
+                        select(SignalRecommendation.action)
+                        .where(
+                            SignalRecommendation.symbol == symbol,
+                            SignalRecommendation.timeframe == tf,
+                            SignalRecommendation.is_current == True,  # noqa: E712
+                        )
+                        .limit(1)
+                    ).first()
+                    prev_action = prev_row[0] if prev_row else None
+
                     # Mark old signals as not current
                     db.execute(
                         update(SignalRecommendation)
@@ -241,8 +254,9 @@ def _run_signal_generation() -> None:
                     db.commit()
                     count += 1
 
-                    # Discord notification for BUY/SELL signals
-                    if sig.get("action") in ("BUY", "SELL"):
+                    # Discord notification for BUY/SELL signals — only when action changes
+                    new_action = sig.get("action")
+                    if new_action in ("BUY", "SELL") and new_action != prev_action:
                         try:
                             from app.discord_notifier import notify_signal
                             notify_signal(symbol, tf, sig)

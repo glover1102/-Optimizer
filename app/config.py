@@ -17,6 +17,7 @@ DEFAULT_TRIALS: int = int(os.getenv("DEFAULT_TRIALS", "500"))
 PORT: int = int(os.getenv("PORT", "8000"))
 
 DISCORD_WEBHOOK_URL: str = os.getenv("DISCORD_WEBHOOK_URL", "")
+DISCORD_WEBHOOK_OPTIMIZER: str = os.getenv("DISCORD_WEBHOOK_OPTIMIZER", "")
 OPTIMIZE_PASSCODE: str = os.getenv("OPTIMIZE_PASSCODE", "96541230")
 
 # Signal generation config

@@ -14,6 +14,8 @@ Endpoints:
   GET  /api/signals/{symbol}/{tf}     → Get signal for symbol/timeframe
   POST /api/webhook/tv                → Receive TradingView alert webhooks
   GET  /api/health                    → Health check
+  POST /api/db/migrate                → Manually trigger schema migration (requires passcode)
+  GET  /api/db/status                 → Show table/column status (requires passcode)
 """
 
 from __future__ import annotations
@@ -658,6 +660,70 @@ async def test_discord():
         return {"status": "sent", "message": "Test message sent to Discord"}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Discord test failed: {exc}")
+
+
+class DbMigrateRequest(BaseModel):
+    code: str
+
+
+@app.post("/api/db/migrate")
+async def api_db_migrate(req: DbMigrateRequest):
+    """Manually trigger schema migration to add missing columns (requires passcode)."""
+    from app.config import OPTIMIZE_PASSCODE
+    if req.code != OPTIMIZE_PASSCODE:
+        raise HTTPException(status_code=403, detail="Invalid code")
+
+    try:
+        from app.database import get_engine, run_migrations
+        result = run_migrations(get_engine())
+        return {
+            "status": "ok",
+            "added": result["added"],
+            "skipped": result["skipped"],
+            "errors": result["errors"],
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Migration failed: {exc}")
+
+
+@app.get("/api/db/status")
+async def api_db_status(code: str = ""):
+    """Show per-table column status (requires passcode query param ?code=...)."""
+    from app.config import OPTIMIZE_PASSCODE
+    if code != OPTIMIZE_PASSCODE:
+        raise HTTPException(status_code=403, detail="Invalid code")
+
+    try:
+        from sqlalchemy import inspect as sa_inspect
+        from app.database import get_engine, is_db_available
+        from app.models import Base
+
+        if not is_db_available():
+            return {"db_available": False}
+
+        engine = get_engine()
+        inspector = sa_inspect(engine)
+        existing_tables = set(inspector.get_table_names())
+
+        tables_status = {}
+        for table_name, table in Base.metadata.tables.items():
+            if table_name not in existing_tables:
+                tables_status[table_name] = {"exists": False}
+                continue
+
+            existing_cols = {row["name"] for row in inspector.get_columns(table_name)}
+            model_cols = {col.name for col in table.columns}
+            missing = sorted(model_cols - existing_cols)
+            tables_status[table_name] = {
+                "exists": True,
+                "existing_columns": sorted(existing_cols),
+                "model_columns": sorted(model_cols),
+                "missing_columns": missing,
+            }
+
+        return {"db_available": True, "dialect": engine.dialect.name, "tables": tables_status}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"DB status check failed: {exc}")
 
 
 @app.get("/api/signals/history")

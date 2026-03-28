@@ -159,6 +159,12 @@ def notify_optimization_result(result_dict: dict) -> None:
     except Exception as exc:  # noqa: BLE001
         logger.warning("Discord notification failed: %s", exc)
 
+    try:
+        from app.pushover_notifier import notify_optimization_result as pushover_notify_opt
+        pushover_notify_opt(result_dict)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Pushover optimization notification failed: %s", exc)
+
 
 def notify_signal(symbol: str, timeframe: str, signal_dict: dict) -> None:
     """Send a Discord embed for a BUY or SELL signal recommendation.
@@ -227,6 +233,12 @@ def notify_signal(symbol: str, timeframe: str, signal_dict: dict) -> None:
         logger.warning("Discord signal notification failed (network): %s", exc)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Discord signal notification failed: %s", exc)
+
+    try:
+        from app.pushover_notifier import notify_signal as pushover_notify_signal
+        pushover_notify_signal(symbol, timeframe, signal_dict)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Pushover signal notification failed: %s", exc)
 
 
 def send_startup_message() -> None:
@@ -341,3 +353,9 @@ def notify_signal_outcome(signal_dict: dict) -> None:
         logger.warning("Discord outcome notification failed (network): %s", exc)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Discord outcome notification failed: %s", exc)
+
+    try:
+        from app.pushover_notifier import notify_signal_outcome as pushover_notify_outcome
+        pushover_notify_outcome(signal_dict)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Pushover outcome notification failed: %s", exc)

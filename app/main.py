@@ -716,6 +716,18 @@ async def test_discord():
         raise HTTPException(status_code=500, detail=f"Discord test failed: {exc}")
 
 
+@app.post("/api/pushover/test")
+async def test_pushover():
+    """Send a test Pushover notification."""
+    try:
+        from app.pushover_notifier import send_test_notification
+        send_test_notification()
+        return {"status": "ok", "message": "Test notification sent"}
+    except Exception as exc:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(exc)})
+
+
 class DbMigrateRequest(BaseModel):
     code: str
 

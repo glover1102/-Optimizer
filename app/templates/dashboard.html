@@ -61,6 +61,7 @@
     <button id="btn-run-all" class="btn btn-primary" onclick="runAllOptimizations()">⚡ Run Full Optimization</button>
     <button id="btn-gen-signals" class="btn btn-primary" style="background: var(--accent);" onclick="generateAllSignals()">📡 Generate Signals</button>
     <button id="btn-test-discord" class="btn" style="border-color: #5865F2; color: #5865F2;" onclick="testDiscord()">🔔 Test Discord</button>
+    <button id="btn-test-pushover" class="btn" style="border-color: #009688; color: #009688;" onclick="testPushover()">📲 Test Pushover</button>
     <span id="run-all-status" style="font-size: 13px; color: var(--muted);"></span>
 </div>
 
@@ -75,6 +76,7 @@
         <span>Avg Confidence: <strong>{{ "%.0f" | format(signal_stats.get('avg_confidence', 0) * 100) }}%</strong></span>
         <span>⚡ Confluence: <strong>{{ signal_stats.get('confluence_count', 0) }}</strong></span>
     </div>
+    <div class="table-responsive">
     <table>
         <thead>
             <tr>
@@ -124,6 +126,7 @@
             {% endfor %}
         </tbody>
     </table>
+    </div>
 </div>
 {% endif %}
 
@@ -139,6 +142,7 @@
         <span>Avg Win Rate: <strong>{{ "%.1f" | format(top_results | sum(attribute='win_rate') / (top_results | length) * 100) }}%</strong></span>
         <span>Best Symbol: <strong style="color: var(--accent);">{{ top_picks_symbol or "—" }}</strong></span>
     </div>
+    <div class="table-responsive">
     <table>
         <thead>
             <tr>
@@ -172,6 +176,7 @@
             {% endfor %}
         </tbody>
     </table>
+    </div>
 </div>
 {% endif %}
 
@@ -188,6 +193,7 @@
     </div>
 
     {% if results %}
+    <div class="table-responsive">
     <table>
         <thead>
             <tr>
@@ -223,6 +229,7 @@
             {% endfor %}
         </tbody>
     </table>
+    </div>
     {% else %}
     <div class="empty-state">
         <h3>No results yet</h3>
@@ -237,6 +244,7 @@
     <div class="card-title">📜 Signal History (Last 20 Resolved)</div>
     <div id="signal-history-loading" style="color: var(--muted); font-size: 13px;">Loading…</div>
     <div id="signal-history-content" style="display:none;">
+        <div class="table-responsive">
         <table>
             <thead>
                 <tr>
@@ -246,6 +254,7 @@
             </thead>
             <tbody id="signal-history-body"></tbody>
         </table>
+        </div>
         <div id="signal-history-empty" style="display:none; text-align:center; padding:30px; color: var(--muted);">No resolved signals yet.</div>
     </div>
 </div>
@@ -350,6 +359,34 @@ function testDiscord() {
         .finally(function() {
             btn.disabled = false;
             btn.textContent = '🔔 Test Discord';
+            setTimeout(function() { status.textContent = ''; }, 6000);
+        });
+}
+
+function testPushover() {
+    var btn = document.getElementById('btn-test-pushover');
+    var status = document.getElementById('run-all-status');
+    btn.disabled = true;
+    btn.textContent = '⏳ Sending...';
+    status.textContent = '';
+    fetch('/api/pushover/test', { method: 'POST' })
+        .then(function(r) {
+            if (!r.ok) {
+                return r.json().then(function(d) { throw new Error(d.message || d.detail || 'Failed'); });
+            }
+            return r.json();
+        })
+        .then(function(data) {
+            status.style.color = 'var(--green)';
+            status.textContent = '✓ ' + (data.message || 'Pushover test sent!');
+        })
+        .catch(function(err) {
+            status.style.color = 'var(--red)';
+            status.textContent = '❌ ' + err.message;
+        })
+        .finally(function() {
+            btn.disabled = false;
+            btn.textContent = '📲 Test Pushover';
             setTimeout(function() { status.textContent = ''; }, 6000);
         });
 }

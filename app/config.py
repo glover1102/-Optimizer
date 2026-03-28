@@ -20,6 +20,10 @@ DISCORD_WEBHOOK_URL: str = os.getenv("DISCORD_WEBHOOK_URL", "")
 DISCORD_WEBHOOK_OPTIMIZER: str = os.getenv("DISCORD_WEBHOOK_OPTIMIZER", "")
 OPTIMIZE_PASSCODE: str = os.getenv("OPTIMIZE_PASSCODE", "96541230")
 
+PUSHOVER_USER_KEY: str = os.getenv("PUSHOVER_USER_KEY", "")
+PUSHOVER_API_TOKEN: str = os.getenv("PUSHOVER_API_TOKEN", "")
+PUSHOVER_ENABLED: bool = os.getenv("PUSHOVER_ENABLED", "true").lower() in ("true", "1", "yes")
+
 # Signal generation config
 SIGNAL_GENERATION_INTERVAL_MINUTES: int = int(os.getenv("SIGNAL_INTERVAL", "15"))
 DEFAULT_ENTRY_MODE: str = os.getenv("DEFAULT_ENTRY_MODE", "Hybrid")

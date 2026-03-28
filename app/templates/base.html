@@ -78,6 +78,28 @@
 
         .empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
         .empty-state h3 { font-size: 18px; margin-bottom: 8px; color: var(--text); }
+
+        .table-responsive { overflow-x: auto; -webkit-overflow-scrolling: touch; width: 100%; }
+
+        @media (max-width: 768px) {
+            .stat-grid { grid-template-columns: repeat(2, 1fr) !important; gap: 8px !important; }
+            .stat-card { padding: 10px !important; }
+            .stat-value { font-size: 18px !important; }
+            .card { padding: 12px !important; }
+            table { font-size: 12px; }
+            th, td { padding: 4px 6px !important; white-space: nowrap; }
+            nav { flex-wrap: wrap; gap: 8px; }
+            nav a { font-size: 13px; }
+            .container { padding: 8px !important; }
+            header { padding: 10px 12px; flex-wrap: wrap; }
+        }
+
+        @media (max-width: 480px) {
+            .stat-grid { grid-template-columns: repeat(2, 1fr) !important; }
+            .stat-value { font-size: 16px !important; }
+            .btn { font-size: 12px !important; padding: 6px 10px !important; }
+            header h1 { font-size: 15px; }
+        }
     </style>
 </head>
 <body>

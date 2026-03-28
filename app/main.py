@@ -213,6 +213,14 @@ async def dashboard(
                 sig_query = sig_query.filter(SignalRecommendation.symbol.in_(symbols))
             raw_signals = sig_query.order_by(SignalRecommendation.created_at.desc()).all()
             signals = [type("S", (), _signal_to_dict(s))() for s in raw_signals]
+
+            # Separate query for resolved signal stats — includes ALL signals with outcomes, not just current
+            resolved_query = db.query(SignalRecommendation).filter(
+                SignalRecommendation.outcome.isnot(None)
+            )
+            if asset_class:
+                resolved_query = resolved_query.filter(SignalRecommendation.symbol.in_(symbols))
+            all_resolved = resolved_query.all()
         finally:
             db_gen.close()
 
@@ -224,7 +232,7 @@ async def dashboard(
 
         # Compute enhanced signal stats for dashboard stat cards
         all_signals_list = [_signal_to_dict(s) for s in raw_signals]
-        resolved = [s for s in all_signals_list if s.get("outcome")]
+        resolved = [_signal_to_dict(s) for s in all_resolved]
         tp1_hits = sum(1 for s in resolved if s["outcome"] in ("tp1_hit", "tp2_hit", "tp3_hit"))
         tp2_hits = sum(1 for s in resolved if s["outcome"] in ("tp2_hit", "tp3_hit"))
         tp3_hits = sum(1 for s in resolved if s["outcome"] == "tp3_hit")

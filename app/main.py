@@ -185,7 +185,8 @@ async def dashboard(
                     "last_run": None,
                     "next_run": None,
                     "signal_stats": {},
-                    "top_symbol": "",
+                    "signal_top_symbol": "",
+                    "top_picks_symbol": "",
                 },
             )
 
@@ -238,11 +239,24 @@ async def dashboard(
             if active_list else 0.0
         )
 
-        # Top symbol by win rate from optimization results
-        top_symbol = ""
-        if enriched:
-            best = max(enriched, key=lambda r: (r.win_rate or 0))
-            top_symbol = best.symbol
+        # Top symbol for active signals (highest combined strength + confidence score)
+        signal_top_symbol = ""
+        if active_list:
+            symbol_scores: dict[str, float] = {}
+            for s in active_list:
+                sym = s["symbol"]
+                # Weight confidence 4x more than strength (confidence is 0–1, strength is 0–4)
+                score = (s.get("strength") or 0) + (s.get("confidence") or 0) * 4
+                symbol_scores[sym] = symbol_scores.get(sym, 0) + score
+            if symbol_scores:
+                signal_top_symbol = max(symbol_scores, key=symbol_scores.get)
+
+        # Top symbol for Top Picks (Grade A & B only, highest win rate)
+        top_picks_symbol = ""
+        top_picks = [r for r in enriched if getattr(r, "confidence_grade", "") in ("A", "B")]
+        if top_picks:
+            best_pick = max(top_picks, key=lambda r: (r.win_rate or 0))
+            top_picks_symbol = best_pick.symbol
 
         signal_stats = {
             "resolved_count": len(resolved),
@@ -268,7 +282,8 @@ async def dashboard(
                 "last_run": status["last_run"],
                 "next_run": status["next_run"],
                 "signal_stats": signal_stats,
-                "top_symbol": top_symbol,
+                "signal_top_symbol": signal_top_symbol,
+                "top_picks_symbol": top_picks_symbol,
             },
         )
     except Exception as exc:
@@ -284,7 +299,8 @@ async def dashboard(
                 "last_run": None,
                 "next_run": None,
                 "signal_stats": {},
-                "top_symbol": "",
+                "signal_top_symbol": "",
+                "top_picks_symbol": "",
             },
         )
 

@@ -425,7 +425,7 @@ def _generate_signal_from_arrays(
 
     min_bars = max(left_bars + right_bars + atr_period, 50)
     if n < min_bars:
-        return _hold_signal(timestamp, "insufficient data")
+        return _hold_signal(timestamp, "insufficient data", entry_mode)
 
     # ── ATR ──────────────────────────────────────────────────────────────
     atr = _atr(high, low, close, atr_period)
@@ -473,7 +473,10 @@ def _generate_signal_from_arrays(
         ema_trend = _ema(close, int(p.get("ema_trend_period", 300)))
 
     # ── Golden Line ───────────────────────────────────────────────────────
+    # Auto-enable GL computation when entry mode requires it (Hybrid/Crossover)
     use_gl = bool(p.get("use_golden_line", False))
+    if entry_mode in ("Hybrid", "Crossover") and not use_gl:
+        use_gl = True
     gl = np.full(n, np.nan)
     if use_gl:
         filters_active.append("golden_line")
@@ -584,12 +587,12 @@ def _generate_signal_from_arrays(
             direction = last_gl_crossover_dir
 
     if signal_bar is None or direction == 0:
-        return _hold_signal(timestamp, "no signal detected")
+        return _hold_signal(timestamp, "no signal detected", entry_mode)
 
     i = signal_bar  # alias for readability
     atr_val = atr[i]
     if np.isnan(atr_val) or atr_val <= 0:
-        return _hold_signal(timestamp, "invalid ATR at signal bar")
+        return _hold_signal(timestamp, "invalid ATR at signal bar", entry_mode)
 
     # ─────────────────────────────────────────────────────────────────────
     # Apply filters at the signal bar
@@ -606,13 +609,13 @@ def _generate_signal_from_arrays(
         trend_ok = ts_val >= trend_threshold
         volume_ok = vs_val >= volume_threshold
         if require_trend and not trend_ok:
-            return _hold_signal(timestamp, "blocked by regime trend filter")
+            return _hold_signal(timestamp, "blocked by regime trend filter", entry_mode)
         if require_volume and not volume_ok:
-            return _hold_signal(timestamp, "blocked by regime volume filter")
+            return _hold_signal(timestamp, "blocked by regime volume filter", entry_mode)
         strength = _signal_strength(ts_val, vs_val, trend_threshold, volume_threshold)
         # In Pivot mode require strength >= 2
         if entry_mode == "Pivot" and strength < 2:
-            return _hold_signal(timestamp, f"strength {strength} < 2 required")
+            return _hold_signal(timestamp, f"strength {strength} < 2 required", entry_mode)
     else:
         strength = 2  # default when no regime filter
 
@@ -623,9 +626,9 @@ def _generate_signal_from_arrays(
         os_ = float(p.get("rsi_oversold", 30.0))
         if not np.isnan(rsi_val):
             if direction == 1 and rsi_val >= ob:
-                return _hold_signal(timestamp, "blocked by RSI overbought")
+                return _hold_signal(timestamp, "blocked by RSI overbought", entry_mode)
             if direction == -1 and rsi_val <= os_:
-                return _hold_signal(timestamp, "blocked by RSI oversold")
+                return _hold_signal(timestamp, "blocked by RSI oversold", entry_mode)
 
     # WaveTrend filter
     if use_wt:
@@ -635,23 +638,23 @@ def _generate_signal_from_arrays(
         wt_cross = bool(p.get("wt_require_cross", False))
         if not np.isnan(wt1_val):
             if direction == 1 and wt1_val >= wt_ob:
-                return _hold_signal(timestamp, "blocked by WT overbought")
+                return _hold_signal(timestamp, "blocked by WT overbought", entry_mode)
             if direction == -1 and wt1_val <= wt_os:
-                return _hold_signal(timestamp, "blocked by WT oversold")
+                return _hold_signal(timestamp, "blocked by WT oversold", entry_mode)
             if wt_cross and not np.isnan(wt2[i]):
                 if direction == 1 and wt1_val <= wt2[i]:
-                    return _hold_signal(timestamp, "blocked by WT cross confirmation")
+                    return _hold_signal(timestamp, "blocked by WT cross confirmation", entry_mode)
                 if direction == -1 and wt1_val >= wt2[i]:
-                    return _hold_signal(timestamp, "blocked by WT cross confirmation")
+                    return _hold_signal(timestamp, "blocked by WT cross confirmation", entry_mode)
 
     # EMA trend filter
     if use_ema_trend:
         ema_val = ema_trend[i]
         if not np.isnan(ema_val):
             if direction == 1 and close[i] < ema_val:
-                return _hold_signal(timestamp, "blocked by EMA trend filter (bearish)")
+                return _hold_signal(timestamp, "blocked by EMA trend filter (bearish)", entry_mode)
             if direction == -1 and close[i] > ema_val:
-                return _hold_signal(timestamp, "blocked by EMA trend filter (bullish)")
+                return _hold_signal(timestamp, "blocked by EMA trend filter (bullish)", entry_mode)
 
     # Golden Line directional filter (Pivot mode)
     if use_gl and entry_mode == "Pivot":
@@ -659,9 +662,9 @@ def _generate_signal_from_arrays(
         ema_gl = ema_for_gl[i]
         if not np.isnan(gl_val) and not np.isnan(ema_gl):
             if direction == 1 and gl_val <= ema_gl:
-                return _hold_signal(timestamp, "blocked by Golden Line (bearish)")
+                return _hold_signal(timestamp, "blocked by Golden Line (bearish)", entry_mode)
             if direction == -1 and gl_val >= ema_gl:
-                return _hold_signal(timestamp, "blocked by Golden Line (bullish)")
+                return _hold_signal(timestamp, "blocked by Golden Line (bullish)", entry_mode)
 
     # Price position filter
     if use_price_pos and use_gl and use_ema_trend:
@@ -670,9 +673,9 @@ def _generate_signal_from_arrays(
         ema_val = ema_for_gl[i]
         if not np.isnan(gl_val) and not np.isnan(ema_val):
             if direction == -1 and price > gl_val and price > ema_val:
-                return _hold_signal(timestamp, "blocked by price position filter (above both lines)")
+                return _hold_signal(timestamp, "blocked by price position filter (above both lines)", entry_mode)
             if direction == 1 and price < gl_val and price < ema_val:
-                return _hold_signal(timestamp, "blocked by price position filter (below both lines)")
+                return _hold_signal(timestamp, "blocked by price position filter (below both lines)", entry_mode)
 
     # ─────────────────────────────────────────────────────────────────────
     # Calculate entry, SL, targets
@@ -718,7 +721,7 @@ def _generate_signal_from_arrays(
     }
 
 
-def _hold_signal(timestamp: Optional[str], reason: str = "") -> dict[str, Any]:
+def _hold_signal(timestamp: Optional[str], reason: str = "", entry_mode: str = "Pivot") -> dict[str, Any]:
     return {
         "action": "HOLD",
         "strength": 0,
@@ -729,7 +732,7 @@ def _hold_signal(timestamp: Optional[str], reason: str = "") -> dict[str, Any]:
         "tp3_price": None,
         "regime": "unknown",
         "filters_active": [],
-        "entry_mode": "Pivot",
+        "entry_mode": entry_mode,
         "is_confluence": False,
         "confidence": 0.0,
         "timestamp": timestamp or datetime.now(timezone.utc).isoformat(),

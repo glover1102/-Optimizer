@@ -178,6 +178,11 @@ def notify_signal(symbol: str, timeframe: str, signal_dict: dict) -> None:
     signal_dict:
         Signal dict as returned by signal_generator.generate_signal().
     """
+    from app.notification_state import is_paused
+    if is_paused():
+        logger.info("Notifications paused — skipping Discord alert for %s %s", symbol, timeframe)
+        return
+
     try:
         webhook_url = _get_webhook_url()
         if not webhook_url:
@@ -267,6 +272,15 @@ def notify_signal_outcome(signal_dict: dict) -> None:
         Expected keys: symbol, timeframe, action, entry_price, outcome,
         outcome_price, pnl_percent, highest_tp_hit, created_at, outcome_at.
     """
+    from app.notification_state import is_paused
+    if is_paused():
+        logger.info(
+            "Notifications paused — skipping Discord outcome alert for %s %s",
+            signal_dict.get("symbol", "UNKNOWN"),
+            signal_dict.get("timeframe", ""),
+        )
+        return
+
     try:
         webhook_url = _get_webhook_url()
         if not webhook_url:

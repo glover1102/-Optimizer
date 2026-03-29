@@ -62,6 +62,7 @@
     <button id="btn-gen-signals" class="btn btn-primary" style="background: var(--accent);" onclick="generateAllSignals()">📡 Generate Signals</button>
     <button id="btn-test-discord" class="btn" style="border-color: #5865F2; color: #5865F2;" onclick="testDiscord()">🔔 Test Discord</button>
     <button id="btn-test-pushover" class="btn" style="border-color: #009688; color: #009688;" onclick="testPushover()">📲 Test Pushover</button>
+    <button id="btn-notif-toggle" class="btn" style="border-color: #e67e22; color: #e67e22;" onclick="toggleNotifications()">🔔 Notifications On</button>
     <span id="run-all-status" style="font-size: 13px; color: var(--muted);"></span>
 </div>
 
@@ -390,6 +391,41 @@ function testPushover() {
             setTimeout(function() { status.textContent = ''; }, 6000);
         });
 }
+
+function _updateNotifBtn(paused) {
+    var btn = document.getElementById('btn-notif-toggle');
+    if (!btn) return;
+    if (paused) {
+        btn.textContent = '🔕 Notifications Off';
+        btn.style.borderColor = '#e74c3c';
+        btn.style.color = '#e74c3c';
+    } else {
+        btn.textContent = '🔔 Notifications On';
+        btn.style.borderColor = '#e67e22';
+        btn.style.color = '#e67e22';
+    }
+}
+
+function toggleNotifications() {
+    var btn = document.getElementById('btn-notif-toggle');
+    var paused = btn.textContent.indexOf('Off') === -1;
+    var endpoint = paused ? '/api/notifications/pause' : '/api/notifications/resume';
+    btn.disabled = true;
+    fetch(endpoint, { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) { _updateNotifBtn(data.paused); })
+        .catch(function(err) {
+            var status = document.getElementById('run-all-status');
+            if (status) { status.style.color = 'var(--red)'; status.textContent = '❌ ' + err.message; }
+        })
+        .finally(function() { btn.disabled = false; });
+}
+
+// Fetch initial notification state on page load
+fetch('/api/notifications/status')
+    .then(function(r) { return r.json(); })
+    .then(function(data) { _updateNotifBtn(data.paused); })
+    .catch(function() {});
 
 function optimizeSymbol(symbol, timeframe, btn) {
     var code = prompt('Enter optimization code:');

@@ -59,6 +59,11 @@ def _send_pushover(title: str, message: str, priority: int = 0, html: int = 1) -
 
 def notify_signal(symbol: str, timeframe: str, signal_dict: dict) -> None:
     """Send a Pushover alert for a BUY or SELL signal."""
+    from app.notification_state import is_paused
+    if is_paused():
+        logger.info("Notifications paused — skipping Pushover alert for %s %s", symbol, timeframe)
+        return
+
     try:
         action = signal_dict.get("action", "HOLD")
         if action == "HOLD":
@@ -93,6 +98,15 @@ def notify_signal(symbol: str, timeframe: str, signal_dict: dict) -> None:
 
 def notify_signal_outcome(signal_dict: dict) -> None:
     """Send a Pushover alert when a signal resolves."""
+    from app.notification_state import is_paused
+    if is_paused():
+        logger.info(
+            "Notifications paused — skipping Pushover outcome alert for %s %s",
+            signal_dict.get("symbol", "UNKNOWN"),
+            signal_dict.get("timeframe", ""),
+        )
+        return
+
     try:
         outcome = signal_dict.get("outcome")
         if not outcome:

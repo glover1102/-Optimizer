@@ -756,6 +756,31 @@ async def test_pushover():
         return JSONResponse(status_code=500, content={"status": "error", "message": str(exc)})
 
 
+@app.get("/api/notifications/status")
+async def notifications_status():
+    """Return current notification pause state."""
+    from app.notification_state import is_paused
+    return {"paused": is_paused()}
+
+
+@app.post("/api/notifications/pause")
+async def notifications_pause():
+    """Pause all outgoing Discord and Pushover notifications."""
+    from app.notification_state import pause_notifications
+    pause_notifications()
+    logger.info("Notifications paused via API")
+    return {"paused": True, "message": "Notifications paused"}
+
+
+@app.post("/api/notifications/resume")
+async def notifications_resume():
+    """Resume outgoing Discord and Pushover notifications."""
+    from app.notification_state import resume_notifications
+    resume_notifications()
+    logger.info("Notifications resumed via API")
+    return {"paused": False, "message": "Notifications resumed"}
+
+
 class DbMigrateRequest(BaseModel):
     code: str
 

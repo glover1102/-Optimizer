@@ -15,7 +15,7 @@ Deduplication logic
    but no new row or notification is created.
 5. Same BUY/SELL action **and** existing signal is resolved (``outcome`` is not
    ``None``, e.g. tp1_hit / sl_hit / expired) **but** the resolution happened
-   within a cooldown window (``SIGNAL_GENERATION_INTERVAL_MINUTES * 2``) →
+   within a cooldown window (``SIGNAL_GENERATION_INTERVAL_MINUTES * 3``) →
    duplicate (True).  Suppresses the immediate re-alert that would otherwise
    fire on the very next generation cycle after outcome resolution.
 6. Same BUY/SELL action **and** existing signal is resolved **and** the
@@ -150,7 +150,7 @@ def is_duplicate_signal(db, symbol: str, timeframe: str, sig: dict) -> bool:
             if outcome_at.tzinfo is None:
                 outcome_at = outcome_at.replace(tzinfo=timezone.utc)
             age = datetime.now(timezone.utc) - outcome_at
-            cooldown = timedelta(minutes=SIGNAL_GENERATION_INTERVAL_MINUTES * 2)
+            cooldown = timedelta(minutes=SIGNAL_GENERATION_INTERVAL_MINUTES * 3)
             if age < cooldown:
                 # Recently resolved — suppress re-notification
                 existing.is_current = True

@@ -5,10 +5,17 @@ Before persisting a new SignalRecommendation row and firing Discord/Pushover
 notifications, callers should check whether the incoming signal is materially
 different from the most-recent existing signal for the same symbol+timeframe.
 
-A signal is considered a *duplicate* when every price field matches within a
-relative tolerance of 0.01 % (to absorb floating-point noise) **and** the
-action is the same.  HOLD signals are always treated as duplicates of an
-existing HOLD — there is nothing actionable to re-notify about.
+Deduplication logic
+-------------------
+1. No existing signal → not duplicate (False).
+2. Different action → not duplicate (False).
+3. Both HOLD → duplicate (True).
+4. Same BUY/SELL action **and** existing signal is still open (``outcome`` is
+   ``None``) → duplicate (True).  Prices are refreshed on the existing record
+   but no new row or notification is created.
+5. Same BUY/SELL action **and** existing signal is resolved (``outcome`` is not
+   ``None``, e.g. tp1_hit / sl_hit / expired) → not duplicate (False), allow
+   a fresh notification for the new trade.
 
 Usage
 -----
@@ -32,6 +39,18 @@ logger = logging.getLogger(__name__)
 
 # Relative tolerance for price comparison (0.01 %)
 _PRICE_TOL = 0.0001
+
+# Fields copied from the incoming signal dict onto the existing DB record when
+# an open same-direction signal is refreshed in-place (no new row / no alert).
+_REFRESH_FIELDS = (
+    "entry_price",
+    "sl_price",
+    "tp1_price",
+    "tp2_price",
+    "tp3_price",
+    "confidence",
+    "strength",
+)
 
 
 def _prices_match(a: Optional[float], b: Optional[float]) -> bool:
@@ -91,26 +110,29 @@ def is_duplicate_signal(db, symbol: str, timeframe: str, sig: dict) -> bool:
             )
             return True
 
-        # BUY/SELL — compare price fields
-        price_fields = [
-            (sig.get("entry_price"), existing.entry_price),
-            (sig.get("sl_price"), existing.sl_price),
-            (sig.get("tp1_price"), existing.tp1_price),
-            (sig.get("tp2_price"), existing.tp2_price),
-            (sig.get("tp3_price"), existing.tp3_price),
-        ]
-
-        if all(_prices_match(a, b) for a, b in price_fields):
-            # Re-mark as current (in-memory; caller is responsible for commit)
+        # BUY/SELL — check whether the existing signal is still open
+        if existing.outcome is None:
+            # The existing signal has not resolved yet (no TP/SL/expiry hit).
+            # Treat any same-direction signal as a duplicate regardless of price
+            # differences — live OHLCV recalculations always produce slightly
+            # different prices, so price comparison is not a reliable gate here.
             existing.is_current = True
+            # Refresh prices and metadata on the existing record so the DB stays
+            # current without triggering a new notification.
+            for field in _REFRESH_FIELDS:
+                new_val = sig.get(field)
+                if new_val is not None:
+                    setattr(existing, field, new_val)
             logger.info(
-                "Duplicate %s signal skipped for %s %s (prices unchanged)",
+                "Duplicate %s signal skipped for %s %s (existing signal still open)",
                 new_action,
                 symbol,
                 timeframe,
             )
             return True
 
+        # The existing signal has resolved (tp1_hit, tp2_hit, tp3_hit, sl_hit,
+        # or expired).  Allow a fresh signal + notification for the same direction.
         return False
 
     except Exception as exc:  # noqa: BLE001

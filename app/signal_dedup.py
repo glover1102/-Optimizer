@@ -14,8 +14,12 @@ Deduplication logic
    ``None``) → duplicate (True).  Prices are refreshed on the existing record
    but no new row or notification is created.
 5. Same BUY/SELL action **and** existing signal is resolved (``outcome`` is not
-   ``None``, e.g. tp1_hit / sl_hit / expired) → not duplicate (False), allow
-   a fresh notification for the new trade.
+   ``None``, e.g. tp1_hit / sl_hit / expired) **but** the resolution happened
+   within a cooldown window (``SIGNAL_GENERATION_INTERVAL_MINUTES * 2``) →
+   duplicate (True).  Suppresses the immediate re-alert that would otherwise
+   fire on the very next generation cycle after outcome resolution.
+6. Same BUY/SELL action **and** existing signal is resolved **and** the
+   cooldown has expired → not duplicate (False), allow a fresh notification.
 
 Usage
 -----
@@ -33,6 +37,7 @@ Usage
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -132,7 +137,33 @@ def is_duplicate_signal(db, symbol: str, timeframe: str, sig: dict) -> bool:
             return True
 
         # The existing signal has resolved (tp1_hit, tp2_hit, tp3_hit, sl_hit,
-        # or expired).  Allow a fresh signal + notification for the same direction.
+        # or expired).  Before allowing a fresh signal + notification, apply a
+        # cooldown guard: if the signal was resolved very recently (within
+        # SIGNAL_GENERATION_INTERVAL_MINUTES * 2), treat the incoming signal as
+        # a duplicate to prevent the "resolve → immediate re-alert" race.
+        if existing.outcome_at is not None:
+            from app.config import SIGNAL_GENERATION_INTERVAL_MINUTES
+
+            outcome_at = existing.outcome_at
+            # outcome_at is stored as UTC in the DB; if the column is naive
+            # (no tzinfo), assume UTC so arithmetic is timezone-aware.
+            if outcome_at.tzinfo is None:
+                outcome_at = outcome_at.replace(tzinfo=timezone.utc)
+            age = datetime.now(timezone.utc) - outcome_at
+            cooldown = timedelta(minutes=SIGNAL_GENERATION_INTERVAL_MINUTES * 2)
+            if age < cooldown:
+                # Recently resolved — suppress re-notification
+                existing.is_current = True
+                logger.info(
+                    "Suppressing re-alert for %s %s: outcome resolved %s ago (cooldown %s)",
+                    symbol,
+                    timeframe,
+                    age,
+                    cooldown,
+                )
+                return True
+
+        # Cooldown expired (or outcome_at not set) — allow fresh signal + notification.
         return False
 
     except Exception as exc:  # noqa: BLE001

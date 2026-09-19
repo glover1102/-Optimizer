@@ -1,5 +1,5 @@
 """
-FastAPI application — QTAlgo Optimizer.
+FastAPI application — QTAlgo Optimizer for KLS+MoM.
 
 Endpoints:
   GET  /                              → Dashboard HTML
@@ -113,11 +113,14 @@ def _result_to_dict(r) -> dict[str, Any]:
         "symbol": r.symbol,
         "timeframe": r.timeframe,
         "asset_class": _asset_class(r.symbol),
-        "left_bars": r.left_bars,
-        "right_bars": r.right_bars,
-        "offset": r.offset,
-        "atr_multiplier": r.atr_multiplier,
-        "atr_period": r.atr_period,
+        "atr_length": r.atr_length,
+        "sl_mult": r.sl_mult,
+        "tp1_rr": r.tp1_rr,
+        "tp2_rr": r.tp2_rr,
+        "tp3_rr": r.tp3_rr,
+        "tp4_rr": r.tp4_rr,
+        "resolve_mode": r.resolve_mode,
+        "filt_mode": r.filt_mode,
         "win_rate": r.win_rate,
         "tp2_rate": r.tp2_rate,
         "tp3_rate": r.tp3_rate,
@@ -146,6 +149,7 @@ def _signal_to_dict(s) -> dict[str, Any]:
         "tp1_price": s.tp1_price,
         "tp2_price": s.tp2_price,
         "tp3_price": s.tp3_price,
+        "tp4_price": getattr(s, "tp4_price", None),
         "regime": s.regime,
         "entry_mode": s.entry_mode,
         "is_confluence": s.is_confluence,
@@ -532,6 +536,7 @@ def _persist_signal(sig: dict, symbol: str, timeframe: str) -> bool:
                 tp1_price=sig.get("tp1_price"),
                 tp2_price=sig.get("tp2_price"),
                 tp3_price=sig.get("tp3_price"),
+                tp4_price=sig.get("tp4_price"),
                 regime=sig.get("regime"),
                 entry_mode=sig.get("entry_mode"),
                 is_confluence=sig.get("is_confluence", False),
@@ -573,7 +578,7 @@ async def webhook_tradingview(payload: TVWebhookPayload):
             "tp3_price": None,
             "regime": "unknown",
             "filters_active": ["tradingview_webhook"],
-            "entry_mode": "Pivot",
+            "entry_mode": "KeyLevel",
             "is_confluence": False,
             "confidence": 0.5,
             "timestamp": datetime.now(timezone.utc).isoformat(),

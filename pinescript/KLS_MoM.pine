@@ -1,0 +1,255 @@
+//@version=6
+indicator("KLS+MoM [QTAlgo]", overlay=true, max_lines_count=500, max_labels_count=500)
+
+// Reconstructed source-of-record for the repository port.
+// This mirrors the Python KLS+MoM implementation in app/kls_mom.py on chart-timeframe data.
+// request.security-based MTF structure and exchange session calendars are approximated on-chart.
+
+showPDL = input.bool(true,  "PDL")
+showPDO = input.bool(true,  "PDO")
+showPDC = input.bool(true,  "PDC")
+showPDH = input.bool(true,  "PDH")
+showPWH = input.bool(false, "PWH")
+showPWL = input.bool(false, "PWL")
+showOPEN = input.bool(false, "OPEN")
+
+or1Enabled = input.bool(false, "OR#1")
+or1Minutes = input.int(5, "OR#1 Minutes", minval=1)
+or2Enabled = input.bool(false, "OR#2")
+or2Minutes = input.int(360, "OR#2 Minutes", minval=1)
+or3Enabled = input.bool(false, "OR#3")
+or3Minutes = input.int(480, "OR#3 Minutes", minval=1)
+or4Enabled = input.bool(true, "OR#4")
+or4Minutes = input.int(720, "OR#4 Minutes", minval=1)
+
+or2ExtEnabled = input.bool(true, "OR#2 Extensions")
+or3ExtEnabled = input.bool(true, "OR#3 Extensions")
+or4ExtEnabled = input.bool(true, "OR#4 Extensions")
+ext05 = input.bool(false, "0.5x")
+ext10 = input.bool(false, "1.0x")
+ext15 = input.bool(true,  "1.5x")
+ext20 = input.bool(true,  "2.0x")
+
+orAsTrigger = input.bool(true, "OR as Trigger")
+orExtAsTrigger = input.bool(true, "OR Extensions as Trigger")
+reArm = input.bool(true, "Re-arm")
+entryAtLevel = input.bool(false, "Entry at Broken Level")
+
+atrLength = input.int(14, "ATR Length", minval=1)
+atrSmooth = input.string("RMA", "ATR Smoothing", options=["RMA", "SMA", "EMA", "WMA"])
+slMult = input.float(1.5, "SL x ATR", minval=0.1)
+tp1RR = input.float(0.75, "TP1 RR", minval=0.1)
+tp2RR = input.float(1.5, "TP2 RR", minval=0.1)
+tp3RR = input.float(2.25, "TP3 RR", minval=0.1)
+tp4RR = input.float(3.0, "TP4 RR", minval=0.1)
+beAfterTp = input.string("TP1", "Move SL to BE After", options=["TP1", "TP2", "TP3", "TP4"])
+resolveMode = input.string("First touch", "Resolve Mode", options=["First touch", "Close"])
+clearOnTP = input.bool(false, "Clear at TP")
+clearTPSel = input.string("TP1", "Clear TP", options=["TP1", "TP2", "TP3", "TP4"])
+runnerTgt = input.string("TP4", "Runner Target", options=["TP4", "Last enabled TP"])
+
+filtMode = input.string("Strict", "Filter Mode", options=["Strict", "Not against"])
+useFmom = input.bool(true,  "EMA Stack")
+useFvol = input.bool(true,  "Volume Confirm")
+useFrsi = input.bool(true,  "RSI")
+useFmacd = input.bool(true, "MACD")
+useFvwap = input.bool(true, "VWAP")
+useFatr = input.bool(false, "ATR Gate")
+useStruct15 = input.bool(true,  "Structure 15m")
+useStruct1h = input.bool(false, "Structure 1h")
+useStruct4h = input.bool(false, "Structure 4h")
+
+ema9en = input.bool(true,  "EMA 9")
+ema21en = input.bool(true, "EMA 21")
+ema50en = input.bool(true, "EMA 50")
+ema100en = input.bool(false, "EMA 100")
+ema200en = input.bool(false, "EMA 200")
+ema300en = input.bool(false, "EMA 300")
+volLen = input.int(20, "Volume MA Length", minval=1)
+volMult = input.float(1.0, "Volume MA Mult", minval=0.1)
+rsiLen = input.int(14, "RSI Length", minval=1)
+rsiNeutral = input.float(5.0, "RSI Neutral Zone", minval=0.0)
+fatrBaseline = input.int(20, "ATR Baseline", minval=1)
+fatrAllow = input.string("Only Stable", "ATR Allow", options=["Only Stable", "Stable or Low", "Stable or High"])
+
+ma(src, len, kind) =>
+    kind == "EMA" ? ta.ema(src, len) : kind == "WMA" ? ta.wma(src, len) : kind == "SMA" ? ta.sma(src, len) : ta.rma(src, len)
+
+atrVal = ma(ta.tr(true), atrLength, atrSmooth)
+newSession = ta.change(time("D")) != 0
+newWeek = ta.change(time("W")) != 0
+barsPerSession(mins) => math.max(1, int(math.ceil(mins / math.max(1.0, timeframe.in_seconds() / 60.0))))
+
+var float pdo = na
+var float pdh = na
+var float pdl = na
+var float pdc = na
+var float pwh = na
+var float pwl = na
+var float dayOpen = na
+var float dayHigh = na
+var float dayLow = na
+var float dayClose = na
+var float weekHigh = na
+var float weekLow = na
+
+if barstate.isfirst
+    dayOpen := open
+    dayHigh := high
+    dayLow := low
+    dayClose := close
+    weekHigh := high
+    weekLow := low
+
+if newSession
+    pdo := dayOpen
+    pdh := dayHigh
+    pdl := dayLow
+    pdc := dayClose
+    if newWeek
+        pwh := weekHigh
+        pwl := weekLow
+        weekHigh := high
+        weekLow := low
+    dayOpen := open
+    dayHigh := high
+    dayLow := low
+    dayClose := close
+else
+    dayHigh := math.max(nz(dayHigh, high), high)
+    dayLow := math.min(nz(dayLow, low), low)
+    dayClose := close
+    weekHigh := math.max(nz(weekHigh, high), high)
+    weekLow := math.min(nz(weekLow, low), low)
+
+var int sessionBars = 0
+sessionBars := newSession ? 0 : sessionBars + 1
+
+var float or1h = na, var float or1l = na
+var float or2h = na, var float or2l = na
+var float or3h = na, var float or3l = na
+var float or4h = na, var float or4l = na
+var bool or1Locked = false, var bool or2Locked = false, var bool or3Locked = false, var bool or4Locked = false
+
+if newSession
+    or1h := na, or1l := na, or1Locked := false
+    or2h := na, or2l := na, or2Locked := false
+    or3h := na, or3l := na, or3Locked := false
+    or4h := na, or4l := na, or4Locked := false
+
+updateOR(enabled, barsNeeded, h, l, locked) =>
+    _h = h
+    _l = l
+    _locked = locked
+    if enabled and sessionBars < barsNeeded
+        _h := na(_h) ? high : math.max(_h, high)
+        _l := na(_l) ? low : math.min(_l, low)
+        if sessionBars == barsNeeded - 1
+            _locked := true
+    [_h, _l, _locked]
+
+[or1h, or1l, or1Locked] = updateOR(or1Enabled, barsPerSession(or1Minutes), or1h, or1l, or1Locked)
+[or2h, or2l, or2Locked] = updateOR(or2Enabled, barsPerSession(or2Minutes), or2h, or2l, or2Locked)
+[or3h, or3l, or3Locked] = updateOR(or3Enabled, barsPerSession(or3Minutes), or3h, or3l, or3Locked)
+[or4h, or4l, or4Locked] = updateOR(or4Enabled, barsPerSession(or4Minutes), or4h, or4l, or4Locked)
+
+structBias(mult) =>
+    len = math.max(3, int(math.round(mult * 2)))
+    base = ta.sma(close, len)
+    slope = base - base[len / 2]
+    close > base and slope > 0 ? 1 : close < base and slope < 0 ? -1 : 0
+
+filtDir(direction, value) => filtMode == "Strict" ? value == direction : value != -direction
+
+ema9 = ta.ema(close, 9)
+ema21 = ta.ema(close, 21)
+ema50 = ta.ema(close, 50)
+ema100 = ta.ema(close, 100)
+ema200 = ta.ema(close, 200)
+ema300 = ta.ema(close, 300)
+vma = ta.sma(volume, volLen)
+rsiVal = ta.rsi(close, rsiLen)
+[macdLine, signalLine, hist] = ta.macd(close, 12, 26, 9)
+vwapVal = ta.vwap(hlc3)
+atrBase = ta.sma(atrVal, fatrBaseline)
+
+emaListBull = (not ema9en or close > ema9) and (not ema21en or close > ema21) and (not ema50en or close > ema50) and (not ema100en or close > ema100) and (not ema200en or close > ema200) and (not ema300en or close > ema300)
+emaListBear = (not ema9en or close < ema9) and (not ema21en or close < ema21) and (not ema50en or close < ema50) and (not ema100en or close < ema100) and (not ema200en or close < ema200) and (not ema300en or close < ema300)
+emaBias = emaListBull ? 1 : emaListBear ? -1 : 0
+rsiBias = rsiVal > 50 + rsiNeutral ? 1 : rsiVal < 50 - rsiNeutral ? -1 : 0
+macdBias = hist > 0 ? 1 : hist < 0 ? -1 : 0
+vwapBias = close > vwapVal ? 1 : close < vwapVal ? -1 : 0
+volOK = not useFvol or volume > vma * volMult
+atrState = atrVal < atrBase * 0.8 ? "Low" : atrVal > atrBase * 1.2 ? "High" : "Stable"
+atrOK = not useFatr or (fatrAllow == "Only Stable" and atrState == "Stable") or (fatrAllow == "Stable or Low" and (atrState == "Stable" or atrState == "Low")) or (fatrAllow == "Stable or High" and (atrState == "Stable" or atrState == "High"))
+
+s15 = useStruct15 ? structBias(15 / math.max(1.0, timeframe.in_seconds() / 60.0)) : 0
+s1h = useStruct1h ? structBias(60 / math.max(1.0, timeframe.in_seconds() / 60.0)) : 0
+s4h = useStruct4h ? structBias(240 / math.max(1.0, timeframe.in_seconds() / 60.0)) : 0
+structBiasDir = (not useStruct15 or s15 == 1) and (not useStruct1h or s1h == 1) and (not useStruct4h or s4h == 1) ? 1 : (not useStruct15 or s15 == -1) and (not useStruct1h or s1h == -1) and (not useStruct4h or s4h == -1) ? -1 : 0
+
+longOK = filtDir(1, structBiasDir) and filtDir(1, useFmom ? emaBias : 0) and filtDir(1, useFrsi ? rsiBias : 0) and filtDir(1, useFmacd ? macdBias : 0) and filtDir(1, useFvwap ? vwapBias : 0) and volOK and atrOK
+shortOK = filtDir(-1, structBiasDir) and filtDir(-1, useFmom ? emaBias : 0) and filtDir(-1, useFrsi ? rsiBias : 0) and filtDir(-1, useFmacd ? macdBias : 0) and filtDir(-1, useFvwap ? vwapBias : 0) and volOK and atrOK
+
+plot(showPDL ? pdl : na, color=color.red, title="PDL")
+plot(showPDO ? pdo : na, color=color.orange, title="PDO")
+plot(showPDC ? pdc : na, color=color.yellow, title="PDC")
+plot(showPDH ? pdh : na, color=color.green, title="PDH")
+plot(showPWH ? pwh : na, color=color.teal, title="PWH")
+plot(showPWL ? pwl : na, color=color.maroon, title="PWL")
+plot(showOPEN ? dayOpen : na, color=color.blue, title="OPEN")
+plot(or1Enabled and orAsTrigger ? or1h : na, color=color.new(color.green, 35), title="OR1 High")
+plot(or1Enabled and orAsTrigger ? or1l : na, color=color.new(color.red, 35), title="OR1 Low")
+plot(or2Enabled and orAsTrigger ? or2h : na, color=color.new(color.green, 35), title="OR2 High")
+plot(or2Enabled and orAsTrigger ? or2l : na, color=color.new(color.red, 35), title="OR2 Low")
+plot(or3Enabled and orAsTrigger ? or3h : na, color=color.new(color.green, 35), title="OR3 High")
+plot(or3Enabled and orAsTrigger ? or3l : na, color=color.new(color.red, 35), title="OR3 Low")
+plot(or4Enabled and orAsTrigger ? or4h : na, color=color.new(color.green, 35), title="OR4 High")
+plot(or4Enabled and orAsTrigger ? or4l : na, color=color.new(color.red, 35), title="OR4 Low")
+
+longBreak = longOK and ((showPDH and ta.crossover(close, pdh)) or (showPDO and ta.crossover(close, pdo)) or (showPDC and ta.crossover(close, pdc)) or (showPWH and ta.crossover(close, pwh)) or (showOPEN and ta.crossover(close, dayOpen)) or (or1Enabled and orAsTrigger and ta.crossover(close, or1h)) or (or2Enabled and orAsTrigger and ta.crossover(close, or2h)) or (or3Enabled and orAsTrigger and ta.crossover(close, or3h)) or (or4Enabled and orAsTrigger and ta.crossover(close, or4h)))
+shortBreak = shortOK and ((showPDL and ta.crossunder(close, pdl)) or (showPDO and ta.crossunder(close, pdo)) or (showPDC and ta.crossunder(close, pdc)) or (showPWL and ta.crossunder(close, pwl)) or (showOPEN and ta.crossunder(close, dayOpen)) or (or1Enabled and orAsTrigger and ta.crossunder(close, or1l)) or (or2Enabled and orAsTrigger and ta.crossunder(close, or2l)) or (or3Enabled and orAsTrigger and ta.crossunder(close, or3l)) or (or4Enabled and orAsTrigger and ta.crossunder(close, or4l)))
+
+var int pos = 0
+var float entry = na
+var float stop = na
+var float tp1 = na
+var float tp2 = na
+var float tp3 = na
+var float tp4 = na
+var bool movedBE = false
+
+if newSession
+    pos := 0
+    entry := na
+    stop := na
+    movedBE := false
+
+if pos == 0 and longBreak
+    entry := entryAtLevel ? nz(pdh, close) : close
+    stop := entry - atrVal * slMult
+    tp1 := entry + atrVal * slMult * tp1RR
+    tp2 := entry + atrVal * slMult * tp2RR
+    tp3 := entry + atrVal * slMult * tp3RR
+    tp4 := entry + atrVal * slMult * tp4RR
+    pos := 1
+    movedBE := false
+
+if pos == 0 and shortBreak
+    entry := entryAtLevel ? nz(pdl, close) : close
+    stop := entry + atrVal * slMult
+    tp1 := entry - atrVal * slMult * tp1RR
+    tp2 := entry - atrVal * slMult * tp2RR
+    tp3 := entry - atrVal * slMult * tp3RR
+    tp4 := entry - atrVal * slMult * tp4RR
+    pos := -1
+    movedBE := false
+
+plotshape(longBreak, title="Long Break", style=shape.triangleup, color=color.lime, location=location.belowbar, size=size.tiny)
+plotshape(shortBreak, title="Short Break", style=shape.triangledown, color=color.red, location=location.abovebar, size=size.tiny)
+plot(pos != 0 ? entry : na, color=color.white, title="Entry")
+plot(pos != 0 ? stop : na, color=color.red, title="Stop")
+plot(pos != 0 ? tp1 : na, color=color.new(color.green, 0), title="TP1")
+plot(pos != 0 ? tp2 : na, color=color.new(color.green, 20), title="TP2")
+plot(pos != 0 ? tp3 : na, color=color.new(color.green, 40), title="TP3")
+plot(pos != 0 ? tp4 : na, color=color.new(color.green, 60), title="TP4")

@@ -1,6 +1,6 @@
 # QTAlgo Optimizer
 
-Server-side Bayesian parameter optimization engine for the **QTAlgo** TradingView indicator. Replaces Pine Script's limited 8-profile auto-tune with a full optimization engine that tests thousands of parameter combinations across all asset classes.
+Server-side Bayesian parameter optimization engine for the **QTAlgo KLS+MoM** TradingView indicator. Replaces Pine Script's limited 8-profile auto-tune with a full optimization engine that tests thousands of parameter combinations across all asset classes.
 
 ```
 ┌─────────────────────┐     ┌──────────────────────────┐     ┌─────────────┐
@@ -116,6 +116,6 @@ pytest tests/ -v
 
 After optimization completes:
 1. View best parameters on the dashboard at your Railway URL
-2. Apply `left_bars`, `right_bars`, `offset`, `atr_multiplier`, `atr_period` to your QTAlgo chart
-3. The regime label tells you whether these params were optimized for trending, ranging, or volatile conditions
+2. Apply the optimized KLS+MoM settings (ATR length, SL multiple, TP ladder, OR windows, and filters) to your QTAlgo chart
+3. The regime label tells you whether these params were optimized for bullish, bearish, or neutral conditions
 4. Grade A/B results are statistically significant and walk-forward validated

@@ -62,6 +62,7 @@ def test_simulation_completes_and_stores_results(tmp_path, monkeypatch):
         end_date=datetime(2024, 1, 20, tzinfo=timezone.utc),
         objective="risk_adjusted",
         n_trials=2,
+        min_trades=1,
         swept_params=json.dumps(["sl_mult", "use_frsi", "rsi_length"]),
         locked_params=json.dumps({"min_trades": 1}),
         progress_total=6,
@@ -103,6 +104,7 @@ def test_simulation_cancelled_when_requested(tmp_path, monkeypatch):
         end_date=datetime(2024, 1, 10, tzinfo=timezone.utc),
         objective="risk_adjusted",
         n_trials=2,
+        min_trades=1,
         swept_params=json.dumps(["sl_mult"]),
         locked_params=json.dumps({"min_trades": 1}),
         cancel_requested=True,
@@ -134,6 +136,7 @@ def test_apply_simulation_results_creates_current_rows(tmp_path, monkeypatch):
         end_date=datetime(2024, 1, 10, tzinfo=timezone.utc),
         objective="risk_adjusted",
         n_trials=1,
+        min_trades=10,
         swept_params="[]",
         locked_params="{}",
         results=json.dumps(
@@ -193,6 +196,7 @@ def test_api_apply_transitions_status_and_is_idempotent(tmp_path, monkeypatch):
         end_date=datetime(2024, 1, 10, tzinfo=timezone.utc),
         objective="risk_adjusted",
         n_trials=1,
+        min_trades=10,
         swept_params="[]",
         locked_params="{}",
         results=json.dumps(
@@ -245,6 +249,7 @@ def test_auto_mode_expands_filter_sweeps(tmp_path, monkeypatch):
         objective="avg_r",
         auto_mode=True,
         n_trials=2,
+        min_trades=10,
         swept_params=json.dumps(["sl_mult"]),
         locked_params=json.dumps({"min_trades": 10}),
         results=json.dumps({}),
@@ -286,6 +291,7 @@ def test_simulation_clamps_min_trades_and_stores_empty_result_hint(tmp_path, mon
         end_date=datetime(2024, 1, 5, tzinfo=timezone.utc),
         objective="avg_r",
         n_trials=2,
+        min_trades=999,
         swept_params=json.dumps(["sl_mult"]),
         locked_params=json.dumps({"min_trades": 999}),
         results=json.dumps({}),
@@ -352,4 +358,6 @@ def test_run_migrations_adds_simulation_auto_mode_column(tmp_path):
     cols = {col["name"] for col in inspect(engine).get_columns("simulation_runs")}
 
     assert "simulation_runs.auto_mode" in result["added"]
+    assert "simulation_runs.min_trades" in result["added"]
     assert "auto_mode" in cols
+    assert "min_trades" in cols

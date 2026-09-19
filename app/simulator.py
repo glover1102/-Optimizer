@@ -231,7 +231,8 @@ def run_simulation(sim_id: int) -> None:
     run_objective = run.objective
     auto_mode = bool(getattr(run, "auto_mode", False))
     run_trials = int(run.n_trials)
-    min_trades = int(locked_params.get("min_trades", 20))
+    stored_min_trades = getattr(run, "min_trades", None)
+    min_trades = int(stored_min_trades if stored_min_trades is not None else locked_params.get("min_trades", 10))
     locked_params = {k: v for k, v in locked_params.items() if k != "min_trades"}
 
     run.status = "running"
@@ -411,7 +412,7 @@ def run_simulation(sim_id: int) -> None:
                     current.progress_current = current.progress_total
                     if all_results and not any(isinstance(payload, dict) and payload.get("best_params") for payload in all_results.values()):
                         current.error = EMPTY_RESULT_MESSAGE
-                    else:
+                    elif not current.error:
                         current.error = None
                 final_session.commit()
         finally:

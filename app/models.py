@@ -107,6 +107,7 @@ class SimulationRun(Base):
     objective = Column(String, default="risk_adjusted")
     auto_mode = Column(Boolean, default=False)
     n_trials = Column(Integer, default=50)
+    min_trades = Column(Integer, default=10)
     swept_params = Column(Text, default="[]")
     locked_params = Column(Text, default="{}")
     progress_current = Column(Integer, default=0)

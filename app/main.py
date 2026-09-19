@@ -188,6 +188,7 @@ def _simulation_run_to_dict(run) -> dict[str, Any]:
         "objective": run.objective,
         "auto_mode": bool(getattr(run, "auto_mode", False)),
         "n_trials": run.n_trials,
+        "min_trades": getattr(run, "min_trades", 10),
         "swept_params": _loads(run.swept_params, []),
         "locked_params": _loads(run.locked_params, {}),
         "progress_current": run.progress_current or 0,
@@ -598,7 +599,6 @@ async def api_simulate(req: SimulateRequest):
             raise HTTPException(status_code=400, detail="end_date must be on or after start_date")
 
         locked = dict(req.locked_params or {})
-        locked["min_trades"] = max(1, int(req.min_trades))
 
         factory = get_session_factory()
         session = factory()
@@ -612,6 +612,7 @@ async def api_simulate(req: SimulateRequest):
                 objective=req.objective,
                 auto_mode=bool(req.auto_mode),
                 n_trials=max(1, int(req.n_trials)),
+                min_trades=max(1, int(req.min_trades)),
                 swept_params=json.dumps(req.swept_params or []),
                 locked_params=json.dumps(locked),
                 progress_current=0,

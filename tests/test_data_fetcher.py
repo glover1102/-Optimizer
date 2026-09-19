@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from app.data_fetcher import fetch_ohlcv, get_numpy_arrays, clear_cache, _is_crypto, _cache_key
+from app.data_fetcher import fetch_ohlcv, fetch_ohlcv_range, get_numpy_arrays, clear_cache, _is_crypto, _cache_key
 
 
 def _sample_df(n: int = 100) -> pd.DataFrame:
@@ -127,3 +127,20 @@ class TestGetNumpyArrays:
         with patch("app.data_fetcher.fetch_ohlcv", return_value=None):
             result = get_numpy_arrays("INVALID", "1h")
             assert result is None
+
+
+class TestFetchOHLCVRange:
+    def test_crypto_range_uses_ccxt_range(self):
+        df = _sample_df(100)
+        start = pd.Timestamp("2024-01-01T00:00:00Z")
+        end = pd.Timestamp("2024-01-10T00:00:00Z")
+        with patch("app.data_fetcher._fetch_ccxt_range", return_value=df) as mock_ccxt:
+            result = fetch_ohlcv_range("BTCUSDT", "1h", start, end)
+            mock_ccxt.assert_called_once()
+            assert result is not None
+            assert list(result.columns) == ["open", "high", "low", "close", "volume"]
+
+    def test_range_none_when_bad_dates(self):
+        start = pd.Timestamp("2024-01-10T00:00:00Z")
+        end = pd.Timestamp("2024-01-01T00:00:00Z")
+        assert fetch_ohlcv_range("AAPL", "1h", start, end) is None

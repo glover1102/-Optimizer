@@ -24,16 +24,16 @@ import json
 import logging
 import threading
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import date, datetime, time, timezone
+from typing import Any, Literal, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from app.config import WATCHLIST
+from app.config import DEFAULT_SIGNAL_PARAMS, TIMEFRAMES, WATCHLIST
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +162,40 @@ def _signal_to_dict(s) -> dict[str, Any]:
         "outcome_price": s.outcome_price,
         "highest_tp_hit": s.highest_tp_hit,
         "pnl_percent": s.pnl_percent,
+    }
+
+
+def _simulation_run_to_dict(run) -> dict[str, Any]:
+    def _loads(value: Any, fallback: Any):
+        if value is None:
+            return fallback
+        if isinstance(value, (dict, list)):
+            return value
+        try:
+            return json.loads(value)
+        except Exception:
+            return fallback
+
+    return {
+        "id": run.id,
+        "created_at": run.created_at.isoformat() if run.created_at else None,
+        "updated_at": run.updated_at.isoformat() if run.updated_at else None,
+        "status": run.status,
+        "symbols": _loads(run.symbols, []),
+        "timeframe": run.timeframe,
+        "start_date": run.start_date.isoformat() if run.start_date else None,
+        "end_date": run.end_date.isoformat() if run.end_date else None,
+        "objective": run.objective,
+        "n_trials": run.n_trials,
+        "swept_params": _loads(run.swept_params, []),
+        "locked_params": _loads(run.locked_params, {}),
+        "progress_current": run.progress_current or 0,
+        "progress_total": run.progress_total or 0,
+        "current_symbol": run.current_symbol,
+        "best_value": run.best_value,
+        "results": _loads(run.results, {}),
+        "error": run.error,
+        "cancel_requested": bool(run.cancel_requested),
     }
 
 
@@ -359,6 +393,25 @@ async def detail(
     )
 
 
+@app.get("/simulator", response_class=HTMLResponse)
+async def simulator_page(request: Request):
+    from app.simulator import SIM_SWEEP_GENES
+
+    grouped = [{"asset_class": asset_class, "symbols": symbols} for asset_class, symbols in WATCHLIST.items()]
+    return templates.TemplateResponse(
+        request=request,
+        name="simulator.html",
+        context={
+            "request": request,
+            "watchlist_groups": grouped,
+            "timeframes": TIMEFRAMES,
+            "objectives": ["win_rate", "tp2_rate", "risk_adjusted", "profit_factor"],
+            "sweep_genes": SIM_SWEEP_GENES,
+            "default_params": DEFAULT_SIGNAL_PARAMS,
+        },
+    )
+
+
 # ── JSON API routes ───────────────────────────────────────────────────────────
 
 
@@ -487,6 +540,169 @@ class TVWebhookPayload(BaseModel):
     action: Optional[str] = None
     price: Optional[float] = None
     message: Optional[str] = None
+
+
+class SimulateRequest(BaseModel):
+    symbols: list[str]
+    extra_tickers: str = ""
+    timeframe: Literal["5m", "15m", "1h", "4h", "1d"]
+    start_date: date
+    end_date: date
+    objective: Literal["win_rate", "tp2_rate", "risk_adjusted", "profit_factor"] = "risk_adjusted"
+    n_trials: int = 50
+    swept_params: list[str] = Field(default_factory=list)
+    locked_params: dict[str, Any] = Field(default_factory=dict)
+    min_trades: int = 20
+    code: str = ""
+
+
+@app.post("/api/simulate")
+async def api_simulate(req: SimulateRequest):
+    from app.config import OPTIMIZE_PASSCODE
+    if req.code != OPTIMIZE_PASSCODE:
+        raise HTTPException(status_code=403, detail="Invalid code")
+
+    try:
+        from app.database import get_session_factory, is_db_available
+        from app.models import SimulationRun
+        from app.simulator import run_simulation
+
+        if not is_db_available():
+            raise HTTPException(status_code=503, detail="Database unavailable")
+
+        extra = [s.strip().upper() for s in req.extra_tickers.replace("\n", ",").split(",") if s.strip()]
+        symbols = sorted({s.strip().upper() for s in (req.symbols + extra) if s.strip()})
+        if not symbols:
+            raise HTTPException(status_code=400, detail="No symbols provided")
+        if req.end_date < req.start_date:
+            raise HTTPException(status_code=400, detail="end_date must be on or after start_date")
+
+        locked = dict(req.locked_params or {})
+        locked["min_trades"] = max(1, int(req.min_trades))
+
+        factory = get_session_factory()
+        session = factory()
+        try:
+            run = SimulationRun(
+                status="queued",
+                symbols=json.dumps(symbols),
+                timeframe=req.timeframe,
+                start_date=datetime.combine(req.start_date, time.min, tzinfo=timezone.utc),
+                end_date=datetime.combine(req.end_date, time.max, tzinfo=timezone.utc),
+                objective=req.objective,
+                n_trials=max(1, int(req.n_trials)),
+                swept_params=json.dumps(req.swept_params or []),
+                locked_params=json.dumps(locked),
+                progress_current=0,
+                progress_total=max(1, int(req.n_trials)) * len(symbols),
+                results=json.dumps({}),
+                cancel_requested=False,
+            )
+            session.add(run)
+            session.commit()
+            session.refresh(run)
+            sim_id = run.id
+        finally:
+            session.close()
+
+        threading.Thread(target=run_simulation, args=(sim_id,), daemon=True).start()
+        return {"sim_id": sim_id}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Simulation start failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/simulate/{sim_id}")
+async def api_simulate_status(sim_id: int):
+    try:
+        from app.database import get_session_factory, is_db_available
+        from app.models import SimulationRun
+
+        if not is_db_available():
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        factory = get_session_factory()
+        session = factory()
+        try:
+            run = session.query(SimulationRun).filter(SimulationRun.id == sim_id).first()
+            if run is None:
+                raise HTTPException(status_code=404, detail="Simulation not found")
+            return _simulation_run_to_dict(run)
+        finally:
+            session.close()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+class SimulateCancelRequest(BaseModel):
+    code: str = ""
+
+
+@app.post("/api/simulate/{sim_id}/cancel")
+async def api_simulate_cancel(sim_id: int, req: SimulateCancelRequest):
+    from app.config import OPTIMIZE_PASSCODE
+    if req.code != OPTIMIZE_PASSCODE:
+        raise HTTPException(status_code=403, detail="Invalid code")
+    try:
+        from app.database import get_session_factory, is_db_available
+        from app.models import SimulationRun
+
+        if not is_db_available():
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        factory = get_session_factory()
+        session = factory()
+        try:
+            run = session.query(SimulationRun).filter(SimulationRun.id == sim_id).first()
+            if run is None:
+                raise HTTPException(status_code=404, detail="Simulation not found")
+            run.cancel_requested = True
+            if run.status == "queued":
+                run.status = "cancelled"
+            session.commit()
+            return {"status": run.status, "cancel_requested": True}
+        finally:
+            session.close()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+class SimulateApplyRequest(BaseModel):
+    code: str = ""
+
+
+@app.post("/api/simulate/{sim_id}/apply")
+async def api_simulate_apply(sim_id: int, req: SimulateApplyRequest):
+    from app.config import OPTIMIZE_PASSCODE
+    if req.code != OPTIMIZE_PASSCODE:
+        raise HTTPException(status_code=403, detail="Invalid code")
+    try:
+        from app.database import is_db_available
+        from app.database import get_session_factory
+        from app.models import SimulationRun
+        from app.simulator import apply_simulation_results
+
+        if not is_db_available():
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        factory = get_session_factory()
+        session = factory()
+        try:
+            run = session.query(SimulationRun).filter(SimulationRun.id == sim_id).first()
+            if run is None:
+                raise HTTPException(status_code=404, detail="Simulation not found")
+            if run.status != "completed":
+                raise HTTPException(status_code=409, detail="Simulation run must be completed before apply")
+        finally:
+            session.close()
+        return apply_simulation_results(sim_id)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 def _persist_signal(sig: dict, symbol: str, timeframe: str) -> bool:

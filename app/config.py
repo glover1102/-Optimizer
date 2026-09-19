@@ -134,7 +134,7 @@ PARAM_RANGES: dict = {
     "rsi_neutral": (2.0, 10.0),
     "categorical": {
         "atr_smoothing": ["RMA", "SMA", "EMA", "WMA"],
-        "be_after_tp": ["TP1", "TP2", "TP3", "TP4"],
+        "be_after_tp": ["Off", "TP1", "TP2", "TP3", "TP4"],
         "runner_tgt": ["TP4", "Last enabled TP"],
         "resolve_mode": ["First touch", "Close"],
         "filt_mode": ["Strict", "Not against"],

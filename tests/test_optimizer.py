@@ -86,3 +86,24 @@ class TestRunOptimization:
         tp2 = run_optimization(h, l, c, v, open_=open_, timestamps=ts, timeframe="1h", n_trials=3, objective="tp2_rate")
         assert win["best_backtest"]["win_rate"] >= 0.0
         assert tp2["best_backtest"]["tp2_rate"] >= 0.0
+
+    def test_trial_callback_invoked(self):
+        open_, h, l, c, v, ts = _optimization_data()
+        seen = {"count": 0}
+
+        def _cb(_trial):
+            seen["count"] += 1
+
+        run_optimization(
+            h,
+            l,
+            c,
+            v,
+            open_=open_,
+            timestamps=ts,
+            timeframe="1h",
+            n_trials=3,
+            trial_complete_callback=_cb,
+            min_trades=1,
+        )
+        assert seen["count"] >= 1

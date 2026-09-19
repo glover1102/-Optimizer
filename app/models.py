@@ -105,6 +105,7 @@ class SimulationRun(Base):
     start_date = Column(DateTime, nullable=False)
     end_date = Column(DateTime, nullable=False)
     objective = Column(String, default="risk_adjusted")
+    auto_mode = Column(Boolean, default=False)
     n_trials = Column(Integer, default=50)
     swept_params = Column(Text, default="[]")
     locked_params = Column(Text, default="{}")

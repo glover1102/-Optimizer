@@ -24,7 +24,7 @@ import json
 import logging
 import threading
 from contextlib import asynccontextmanager
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Literal, Optional
 
 from fastapi import FastAPI, HTTPException, Request
@@ -33,7 +33,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from app.config import DEFAULT_SIGNAL_PARAMS, TIMEFRAMES, WATCHLIST
+from app.config import DEFAULT_SIGNAL_PARAMS, SIMULATOR_OBJECTIVES, TIMEFRAMES, WATCHLIST
 
 logger = logging.getLogger(__name__)
 
@@ -186,6 +186,7 @@ def _simulation_run_to_dict(run) -> dict[str, Any]:
         "start_date": run.start_date.isoformat() if run.start_date else None,
         "end_date": run.end_date.isoformat() if run.end_date else None,
         "objective": run.objective,
+        "auto_mode": bool(getattr(run, "auto_mode", False)),
         "n_trials": run.n_trials,
         "swept_params": _loads(run.swept_params, []),
         "locked_params": _loads(run.locked_params, {}),
@@ -398,6 +399,8 @@ async def simulator_page(request: Request):
     from app.simulator import SIM_SWEEP_GENES
 
     grouped = [{"asset_class": asset_class, "symbols": symbols} for asset_class, symbols in WATCHLIST.items()]
+    default_end = date.today()
+    default_start = default_end - timedelta(days=90)
     return templates.TemplateResponse(
         request=request,
         name="simulator.html",
@@ -405,9 +408,11 @@ async def simulator_page(request: Request):
             "request": request,
             "watchlist_groups": grouped,
             "timeframes": TIMEFRAMES,
-            "objectives": ["win_rate", "tp2_rate", "risk_adjusted", "profit_factor"],
+            "objectives": SIMULATOR_OBJECTIVES,
             "sweep_genes": SIM_SWEEP_GENES,
             "default_params": DEFAULT_SIGNAL_PARAMS,
+            "default_start_date": default_start.isoformat(),
+            "default_end_date": default_end.isoformat(),
         },
     )
 
@@ -548,11 +553,26 @@ class SimulateRequest(BaseModel):
     timeframe: Literal["5m", "15m", "1h", "4h", "1d"]
     start_date: date
     end_date: date
-    objective: Literal["win_rate", "tp2_rate", "risk_adjusted", "profit_factor"] = "risk_adjusted"
+    objective: Literal[
+        "win_rate",
+        "avg_r",
+        "risk_adjusted",
+        "total_r",
+        "sharpe",
+        "profit_factor",
+        "tp1_rate",
+        "tp2_rate",
+        "tp3_rate",
+        "tp4_rate",
+        "min_drawdown",
+        "expectancy_minus_dd",
+        "profit_factor_minus_dd",
+    ] = "risk_adjusted"
+    auto_mode: bool = False
     n_trials: int = 50
     swept_params: list[str] = Field(default_factory=list)
     locked_params: dict[str, Any] = Field(default_factory=dict)
-    min_trades: int = 20
+    min_trades: int = 10
     code: str = ""
 
 
@@ -590,6 +610,7 @@ async def api_simulate(req: SimulateRequest):
                 start_date=datetime.combine(req.start_date, time.min, tzinfo=timezone.utc),
                 end_date=datetime.combine(req.end_date, time.max, tzinfo=timezone.utc),
                 objective=req.objective,
+                auto_mode=bool(req.auto_mode),
                 n_trials=max(1, int(req.n_trials)),
                 swept_params=json.dumps(req.swept_params or []),
                 locked_params=json.dumps(locked),

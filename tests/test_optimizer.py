@@ -6,7 +6,15 @@ import numpy as np
 import pandas as pd
 
 from app.config import DEFAULT_SIGNAL_PARAMS, PARAM_RANGES
-from app.optimizer import run_optimization
+from app.optimizer import (
+    _objective_score,
+    compute_expectancy_r,
+    compute_max_drawdown_r,
+    compute_profit_factor,
+    compute_sharpe_r,
+    compute_total_r,
+    run_optimization,
+)
 
 
 def _optimization_data(days: int = 10):
@@ -82,10 +90,35 @@ class TestRunOptimization:
 
     def test_objectives_execute(self):
         open_, h, l, c, v, ts = _optimization_data()
-        win = run_optimization(h, l, c, v, open_=open_, timestamps=ts, timeframe="1h", n_trials=3, objective="win_rate")
-        tp2 = run_optimization(h, l, c, v, open_=open_, timestamps=ts, timeframe="1h", n_trials=3, objective="tp2_rate")
-        assert win["best_backtest"]["win_rate"] >= 0.0
-        assert tp2["best_backtest"]["tp2_rate"] >= 0.0
+        for objective in [
+            "win_rate",
+            "avg_r",
+            "risk_adjusted",
+            "total_r",
+            "sharpe",
+            "profit_factor",
+            "tp1_rate",
+            "tp2_rate",
+            "tp3_rate",
+            "tp4_rate",
+            "min_drawdown",
+            "expectancy_minus_dd",
+            "profit_factor_minus_dd",
+        ]:
+            result = run_optimization(
+                h,
+                l,
+                c,
+                v,
+                open_=open_,
+                timestamps=ts,
+                timeframe="1h",
+                n_trials=3,
+                min_trades=1,
+                objective=objective,
+            )
+            assert "best_backtest" in result
+            assert "best_value" in result
 
     def test_trial_callback_invoked(self):
         open_, h, l, c, v, ts = _optimization_data()
@@ -107,3 +140,46 @@ class TestRunOptimization:
             min_trades=1,
         )
         assert seen["count"] >= 1
+
+
+def test_objective_helper_metrics_and_blends():
+    params = {"tp1_rr": 0.8, "tp2_rr": 1.5}
+    result = {
+        "tp1_rate": 0.5,
+        "tp2_rate": 0.25,
+        "tp3_rate": 0.0,
+        "tp4_rate": 0.0,
+        "trades": [
+            {"highest_tp_hit": 2, "outcome": "tp2_hit"},
+            {"highest_tp_hit": 0, "outcome": "sl_hit"},
+            {"highest_tp_hit": 1, "outcome": "tp1_hit"},
+            {"highest_tp_hit": 0, "outcome": "breakeven"},
+        ],
+    }
+
+    expectancy = compute_expectancy_r(result, params)
+    total_r = compute_total_r(result, params)
+    sharpe = compute_sharpe_r(result, params)
+    profit_factor = compute_profit_factor(result, params)
+    max_drawdown = compute_max_drawdown_r(result, params)
+
+    assert expectancy == 0.325
+    assert total_r == 1.3
+    assert round(sharpe, 4) == 0.3491
+    assert profit_factor == 2.3
+    assert max_drawdown == 1.0
+    assert _objective_score(result, "avg_r", params) == expectancy
+    assert _objective_score(result, "risk_adjusted", params) == expectancy
+    assert _objective_score(result, "total_r", params) == total_r
+    assert _objective_score(result, "min_drawdown", params) == -1.0
+    assert _objective_score(result, "expectancy_minus_dd", params) == -0.175
+    assert round(_objective_score(result, "profit_factor_minus_dd", params), 4) == 1.8
+
+
+def test_sharpe_returns_zero_for_small_or_flat_samples():
+    params = {"tp1_rr": 1.0}
+    assert compute_sharpe_r({"trades": [{"highest_tp_hit": 1, "outcome": "tp1_hit"}]}, params) == 0.0
+    assert compute_sharpe_r(
+        {"trades": [{"highest_tp_hit": 1, "outcome": "tp1_hit"}, {"highest_tp_hit": 1, "outcome": "tp1_hit"}]},
+        params,
+    ) == 0.0

@@ -14,7 +14,7 @@ from sqlalchemy.orm import sessionmaker
 from app.models import Base, OptimizationResult, SimulationRun
 from app.main import SimulateApplyRequest, api_simulate_apply
 from app.optimizer import compute_expectancy_r, compute_profit_factor, run_optimization
-from app.simulator import apply_simulation_results, run_simulation
+from app.simulator import AUTO_FILTER_GENES, EMPTY_RESULT_MESSAGE, apply_simulation_results, run_simulation
 
 
 def _synthetic_df(n: int = 240) -> pd.DataFrame:
@@ -221,3 +221,93 @@ def test_api_apply_transitions_status_and_is_idempotent(tmp_path, monkeypatch):
 
     second = asyncio.run(api_simulate_apply(run_id, SimulateApplyRequest(code="ok")))
     assert second == {"applied": [], "status": "already_applied"}
+
+
+def test_auto_mode_expands_filter_sweeps(tmp_path, monkeypatch):
+    factory = _setup_db(tmp_path, monkeypatch)
+    captured = {}
+
+    monkeypatch.setattr("app.simulator.fetch_ohlcv_range", lambda *args, **kwargs: None)
+
+    def _capture_build(base_params, swept_params, locked_params):
+        captured["swept_params"] = set(swept_params)
+        return lambda trial: {}
+
+    monkeypatch.setattr("app.simulator._build_suggest_fn", _capture_build)
+
+    session = factory()
+    run = SimulationRun(
+        status="queued",
+        symbols=json.dumps(["AAPL"]),
+        timeframe="1h",
+        start_date=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        end_date=datetime(2024, 1, 10, tzinfo=timezone.utc),
+        objective="avg_r",
+        auto_mode=True,
+        n_trials=2,
+        swept_params=json.dumps(["sl_mult"]),
+        locked_params=json.dumps({"min_trades": 10}),
+        results=json.dumps({}),
+    )
+    session.add(run)
+    session.commit()
+    run_id = run.id
+    session.close()
+
+    run_simulation(run_id)
+
+    assert "sl_mult" in captured["swept_params"]
+    assert AUTO_FILTER_GENES.issubset(captured["swept_params"])
+
+
+def test_simulation_clamps_min_trades_and_stores_empty_result_hint(tmp_path, monkeypatch):
+    factory = _setup_db(tmp_path, monkeypatch)
+    captured = {}
+    monkeypatch.setattr("app.simulator.fetch_ohlcv_range", lambda *args, **kwargs: _synthetic_df(40))
+
+    def _fake_run_optimization(*args, **kwargs):
+        captured["min_trades"] = kwargs["min_trades"]
+        return {
+            "best_params": {"sl_mult": 1.5},
+            "best_value": 0.0,
+            "best_backtest": {"total_signals": 0},
+            "top_trials": [],
+            "n_trials_completed": 0,
+        }
+
+    monkeypatch.setattr("app.simulator.run_optimization", _fake_run_optimization)
+
+    session = factory()
+    run = SimulationRun(
+        status="queued",
+        symbols=json.dumps(["AAPL"]),
+        timeframe="1h",
+        start_date=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        end_date=datetime(2024, 1, 5, tzinfo=timezone.utc),
+        objective="avg_r",
+        n_trials=2,
+        swept_params=json.dumps(["sl_mult"]),
+        locked_params=json.dumps({"min_trades": 999}),
+        results=json.dumps({}),
+    )
+    session.add(run)
+    session.commit()
+    run_id = run.id
+    session.close()
+
+    run_simulation(run_id)
+
+    assert captured["min_trades"] == 1
+
+    session = factory()
+    saved = session.query(SimulationRun).filter(SimulationRun.id == run_id).first()
+    assert saved is not None
+    assert saved.status == "completed"
+    assert saved.error == EMPTY_RESULT_MESSAGE
+
+    results = json.loads(saved.results)
+    assert results["AAPL"]["empty_result"] is True
+    assert results["AAPL"]["message"] == EMPTY_RESULT_MESSAGE
+    assert results["AAPL"]["requested_min_trades"] == 999
+    assert results["AAPL"]["effective_min_trades"] == 1
+    session.close()

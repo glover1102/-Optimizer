@@ -1,0 +1,261 @@
+{% extends "base.html" %}
+{% block title %}Simulator — QTAlgo Optimizer{% endblock %}
+{% block content %}
+<div class="card">
+  <h2 class="card-title">Simulator</h2>
+  <div class="filter-bar" style="align-items:flex-end; gap:12px;">
+    <div>
+      <label for="symbols">Symbols</label><br>
+      <select id="symbols" multiple style="min-width:280px; min-height:150px; background:#0d1117;color:#e6edf3;border:1px solid #30363d;">
+        {% for g in watchlist_groups %}
+          <optgroup label="{{ g.asset_class|upper }}">
+            {% for s in g.symbols %}
+              <option value="{{ s }}">{{ s }}</option>
+            {% endfor %}
+          </optgroup>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="extra_tickers">Add tickers (comma-separated)</label><br>
+      <input id="extra_tickers" class="btn" style="width:280px;background:#0d1117;" placeholder="NFLX, EURJPY=X">
+    </div>
+    <div>
+      <label for="timeframe">Timeframe</label><br>
+      <select id="timeframe" class="btn" style="background:#0d1117;">
+        {% for tf in timeframes %}<option value="{{ tf }}">{{ tf }}</option>{% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="start_date">Start date</label><br>
+      <input id="start_date" type="date" class="btn" style="background:#0d1117;">
+    </div>
+    <div>
+      <label for="end_date">End date</label><br>
+      <input id="end_date" type="date" class="btn" style="background:#0d1117;">
+    </div>
+    <div>
+      <label for="objective">Objective</label><br>
+      <select id="objective" class="btn" style="background:#0d1117;">
+        {% for o in objectives %}<option value="{{ o }}">{{ o }}</option>{% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="n_trials">Trials</label><br>
+      <input id="n_trials" type="number" value="30" min="1" class="btn" style="width:90px;background:#0d1117;">
+    </div>
+    <div>
+      <label for="min_trades">Min trades</label><br>
+      <input id="min_trades" type="number" value="20" min="1" class="btn" style="width:90px;background:#0d1117;">
+    </div>
+  </div>
+
+  <details class="card" style="padding:12px; margin: 12px 0;">
+    <summary style="cursor:pointer; color:#8b949e;">Parameters to sweep</summary>
+    <div class="table-responsive" style="margin-top:10px; max-height:360px; overflow:auto;">
+      <table>
+        <thead><tr><th>Sweep</th><th>Parameter</th><th>Locked value</th></tr></thead>
+        <tbody>
+        {% for gene in sweep_genes %}
+          <tr>
+            <td><input type="checkbox" class="sweep-param" data-key="{{ gene.key }}"></td>
+            <td>{{ gene.label }} <span style="color:#8b949e">({{ gene.key }})</span></td>
+            <td><input class="btn lock-val" data-key="{{ gene.key }}" value="{{ default_params.get(gene.key, '') }}" style="width:180px;background:#0d1117;"></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+
+  <div class="filter-bar" style="align-items:flex-end; gap:12px;">
+    <div>
+      <label for="passcode">Passcode</label><br>
+      <input id="passcode" type="password" class="btn" style="width:180px;background:#0d1117;">
+    </div>
+    <button id="runBtn" class="btn btn-primary">Run Simulation</button>
+    <button id="cancelBtn" class="btn" style="display:none;">Cancel</button>
+    <button id="applyBtn" class="btn" style="display:none;">Apply as current</button>
+  </div>
+
+  <div id="statusBox" style="margin-top:12px; color:#8b949e;" role="status" aria-live="polite"></div>
+  <div style="margin-top:8px; border:1px solid #30363d; border-radius:6px; overflow:hidden;">
+    <div id="progressBar" role="progressbar" aria-label="Simulation progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" style="height:12px; width:0%; background:#58a6ff;"></div>
+  </div>
+</div>
+
+<div class="card">
+  <h3 class="card-title">Results</h3>
+  <div id="results"></div>
+</div>
+
+<script>
+(() => {
+  let simId = null;
+  let timer = null;
+  let latestRun = null;
+
+  const $ = (id) => document.getElementById(id);
+
+  function selectedSymbols() {
+    const sel = $('symbols');
+    return Array.from(sel.selectedOptions).map(o => o.value);
+  }
+
+  function parseVal(v) {
+    if (v === 'true') return true;
+    if (v === 'false') return false;
+    if (v !== '' && !isNaN(v)) return Number(v);
+    return v;
+  }
+
+  function esc(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function collectLockedAndSwept() {
+    const swept = [];
+    const locked = {};
+    document.querySelectorAll('.sweep-param').forEach(chk => {
+      const key = chk.dataset.key;
+      if (chk.checked) swept.push(key);
+    });
+    document.querySelectorAll('.lock-val').forEach(inp => {
+      locked[inp.dataset.key] = parseVal(inp.value);
+    });
+    return { swept, locked };
+  }
+
+  function renderResults(run) {
+    const box = $('results');
+    const rows = [];
+    const results = run.results || {};
+    Object.keys(results).forEach(symbol => {
+      const r = results[symbol] || {};
+      if (r.error) {
+        rows.push(`<tr><td>${esc(symbol)}</td><td colspan="5" style="color:#f85149;">${esc(r.error)}</td></tr>`);
+        return;
+      }
+      rows.push(`<tr>
+        <td>${esc(symbol)}</td>
+        <td>${esc((r.best_value ?? '').toString())}</td>
+        <td>${((r.in_sample||{}).win_rate ?? 0).toFixed ? ((r.in_sample||{}).win_rate ?? 0).toFixed(4) : (r.in_sample||{}).win_rate}</td>
+        <td>${((r.out_of_sample||{}).win_rate ?? 0).toFixed ? ((r.out_of_sample||{}).win_rate ?? 0).toFixed(4) : (r.out_of_sample||{}).win_rate}</td>
+        <td>${((r.walk_forward||{}).consistency ?? 0).toFixed ? ((r.walk_forward||{}).consistency ?? 0).toFixed(4) : (r.walk_forward||{}).consistency}</td>
+        <td><details><summary>params</summary><pre style="white-space:pre-wrap;">${esc(JSON.stringify(r.best_params || {}, null, 2))}</pre></details></td>
+      </tr>`);
+    });
+    box.innerHTML = rows.length ? `<div class="table-responsive"><table><thead><tr><th>Symbol</th><th>Best value</th><th>IS win</th><th>OOS win</th><th>Consistency</th><th>Best params</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>` : '<div class="empty-state">No results yet.</div>';
+  }
+
+  async function poll() {
+    if (!simId) return;
+    const r = await fetch(`/api/simulate/${simId}`);
+    if (!r.ok) return;
+    const run = await r.json();
+    latestRun = run;
+    const cur = run.progress_current || 0;
+    const tot = run.progress_total || 1;
+    const pct = Math.max(0, Math.min(100, Math.round((cur / Math.max(tot, 1)) * 100)));
+    $('progressBar').style.width = `${pct}%`;
+    $('progressBar').setAttribute('aria-valuenow', String(pct));
+    $('statusBox').textContent = `Status: ${run.status} | ${cur}/${tot} | Symbol: ${run.current_symbol || '-'} | Best: ${run.best_value ?? '-'}`;
+    renderResults(run);
+
+    if (['completed', 'cancelled', 'error'].includes(run.status)) {
+      clearInterval(timer);
+      timer = null;
+      $('cancelBtn').style.display = 'none';
+      $('applyBtn').style.display = run.status === 'completed' ? 'inline-block' : 'none';
+      $('runBtn').disabled = false;
+    }
+  }
+
+  $('runBtn').addEventListener('click', async () => {
+    const { swept, locked } = collectLockedAndSwept();
+    locked.min_trades = Number($('min_trades').value || 20);
+
+    const payload = {
+      symbols: selectedSymbols(),
+      extra_tickers: $('extra_tickers').value,
+      timeframe: $('timeframe').value,
+      start_date: $('start_date').value,
+      end_date: $('end_date').value,
+      objective: $('objective').value,
+      n_trials: Number($('n_trials').value || 30),
+      swept_params: swept,
+      locked_params: locked,
+      min_trades: Number($('min_trades').value || 20),
+      code: $('passcode').value,
+    };
+
+    $('runBtn').disabled = true;
+    $('cancelBtn').style.display = 'inline-block';
+    $('applyBtn').style.display = 'none';
+    const res = await fetch('/api/simulate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      let msg = await res.text();
+      try {
+        const err = JSON.parse(msg);
+        msg = err.detail || msg;
+      } catch (_) {}
+      $('statusBox').textContent = `Start failed: ${msg}`;
+      simId = null;
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+      $('runBtn').disabled = false;
+      $('cancelBtn').style.display = 'none';
+      $('applyBtn').style.display = 'none';
+      return;
+    }
+    const out = await res.json();
+    simId = out.sim_id;
+    if (timer) clearInterval(timer);
+    timer = setInterval(poll, 1000);
+    poll();
+  });
+
+  $('cancelBtn').addEventListener('click', async () => {
+    if (!simId) return;
+    await fetch(`/api/simulate/${simId}/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: $('passcode').value }),
+    });
+  });
+
+  $('applyBtn').addEventListener('click', async () => {
+    if (!simId) return;
+    $('applyBtn').disabled = true;
+    try {
+      const res = await fetch(`/api/simulate/${simId}/apply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: $('passcode').value }),
+      });
+      const body = await res.text();
+      let parsed = {};
+      try { parsed = JSON.parse(body); } catch (_) {}
+      if (!res.ok) {
+        $('statusBox').textContent = `Apply failed: ${parsed.detail || body}`;
+        return;
+      }
+      $('statusBox').textContent = `Applied results: ${((parsed.applied || []).length)}`;
+    } finally {
+      $('applyBtn').disabled = false;
+    }
+  });
+})();
+</script>
+{% endblock %}

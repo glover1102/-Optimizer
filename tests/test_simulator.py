@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 
 from app.models import Base, OptimizationResult, SimulationRun
@@ -311,3 +311,45 @@ def test_simulation_clamps_min_trades_and_stores_empty_result_hint(tmp_path, mon
     assert results["AAPL"]["requested_min_trades"] == 999
     assert results["AAPL"]["effective_min_trades"] == 1
     session.close()
+
+
+def test_run_migrations_adds_simulation_auto_mode_column(tmp_path):
+    from app.database import run_migrations
+
+    db_path = tmp_path / "migration_test.db"
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE simulation_runs (
+                    id INTEGER PRIMARY KEY,
+                    created_at DATETIME,
+                    updated_at DATETIME,
+                    status VARCHAR,
+                    symbols TEXT NOT NULL,
+                    timeframe VARCHAR NOT NULL,
+                    start_date DATETIME NOT NULL,
+                    end_date DATETIME NOT NULL,
+                    objective VARCHAR,
+                    n_trials INTEGER,
+                    swept_params TEXT,
+                    locked_params TEXT,
+                    progress_current INTEGER,
+                    progress_total INTEGER,
+                    current_symbol VARCHAR,
+                    best_value FLOAT,
+                    results TEXT,
+                    error TEXT,
+                    cancel_requested BOOLEAN
+                )
+                """
+            )
+        )
+
+    result = run_migrations(engine)
+    cols = {col["name"] for col in inspect(engine).get_columns("simulation_runs")}
+
+    assert "simulation_runs.auto_mode" in result["added"]
+    assert "auto_mode" in cols

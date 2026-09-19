@@ -185,6 +185,7 @@
   function renderSelectedSymbols() {
     const box = $('selected_symbols');
     const symbols = selectedSymbols().sort();
+    renderCustomTickers();
     if (!symbols.length) {
       box.innerHTML = '<div style="color:#8b949e;">No symbols selected yet.</div>';
       return;
@@ -337,7 +338,6 @@
   renderAssetClasses();
   renderClassSymbols();
   renderSelectedSymbols();
-  renderCustomTickers();
   $('asset_class').addEventListener('change', renderClassSymbols);
   ['extra_tickers', 'timeframe', 'start_date', 'end_date', 'n_trials', 'min_trades'].forEach(id => {
     if (id === 'extra_tickers') {

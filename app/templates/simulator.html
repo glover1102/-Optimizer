@@ -311,7 +311,6 @@
   $('runBtn').addEventListener('click', async () => {
     if (!validateForm()) return;
     const { swept, locked } = collectLockedAndSwept();
-    locked.min_trades = Number($('min_trades').value || 10);
 
     const payload = {
       symbols: selectedSymbols(),

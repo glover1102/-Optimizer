@@ -24,14 +24,14 @@ import json
 import logging
 import threading
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import date, datetime, time, timezone
+from typing import Any, Literal, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.config import DEFAULT_SIGNAL_PARAMS, TIMEFRAMES, WATCHLIST
 
@@ -545,13 +545,13 @@ class TVWebhookPayload(BaseModel):
 class SimulateRequest(BaseModel):
     symbols: list[str]
     extra_tickers: str = ""
-    timeframe: str
-    start_date: datetime
-    end_date: datetime
-    objective: str = "risk_adjusted"
+    timeframe: Literal["5m", "15m", "1h", "4h", "1d"]
+    start_date: date
+    end_date: date
+    objective: Literal["win_rate", "tp2_rate", "risk_adjusted", "profit_factor"] = "risk_adjusted"
     n_trials: int = 50
-    swept_params: list[str] = []
-    locked_params: dict[str, Any] = {}
+    swept_params: list[str] = Field(default_factory=list)
+    locked_params: dict[str, Any] = Field(default_factory=dict)
     min_trades: int = 20
     code: str = ""
 
@@ -574,6 +574,8 @@ async def api_simulate(req: SimulateRequest):
         symbols = sorted({s.strip().upper() for s in (req.symbols + extra) if s.strip()})
         if not symbols:
             raise HTTPException(status_code=400, detail="No symbols provided")
+        if req.end_date < req.start_date:
+            raise HTTPException(status_code=400, detail="end_date must be on or after start_date")
 
         locked = dict(req.locked_params or {})
         locked["min_trades"] = max(1, int(req.min_trades))
@@ -585,8 +587,8 @@ async def api_simulate(req: SimulateRequest):
                 status="queued",
                 symbols=json.dumps(symbols),
                 timeframe=req.timeframe,
-                start_date=req.start_date,
-                end_date=req.end_date,
+                start_date=datetime.combine(req.start_date, time.min, tzinfo=timezone.utc),
+                end_date=datetime.combine(req.end_date, time.max, tzinfo=timezone.utc),
                 objective=req.objective,
                 n_trials=max(1, int(req.n_trials)),
                 swept_params=json.dumps(req.swept_params or []),
@@ -680,10 +682,22 @@ async def api_simulate_apply(sim_id: int, req: SimulateApplyRequest):
         raise HTTPException(status_code=403, detail="Invalid code")
     try:
         from app.database import is_db_available
+        from app.database import get_session_factory
+        from app.models import SimulationRun
         from app.simulator import apply_simulation_results
 
         if not is_db_available():
             raise HTTPException(status_code=503, detail="Database unavailable")
+        factory = get_session_factory()
+        session = factory()
+        try:
+            run = session.query(SimulationRun).filter(SimulationRun.id == sim_id).first()
+            if run is None:
+                raise HTTPException(status_code=404, detail="Simulation not found")
+            if run.status != "completed":
+                raise HTTPException(status_code=409, detail="Simulation run must be completed before apply")
+        finally:
+            session.close()
         return apply_simulation_results(sim_id)
     except HTTPException:
         raise

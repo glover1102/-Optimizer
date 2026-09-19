@@ -5,7 +5,7 @@
   <h2 class="card-title">Simulator</h2>
   <div class="filter-bar" style="align-items:flex-end; gap:12px;">
     <div>
-      <label>Symbols</label><br>
+      <label for="symbols">Symbols</label><br>
       <select id="symbols" multiple style="min-width:280px; min-height:150px; background:#0d1117;color:#e6edf3;border:1px solid #30363d;">
         {% for g in watchlist_groups %}
           <optgroup label="{{ g.asset_class|upper }}">
@@ -17,35 +17,35 @@
       </select>
     </div>
     <div>
-      <label>Add tickers (comma-separated)</label><br>
+      <label for="extra_tickers">Add tickers (comma-separated)</label><br>
       <input id="extra_tickers" class="btn" style="width:280px;background:#0d1117;" placeholder="NFLX, EURJPY=X">
     </div>
     <div>
-      <label>Timeframe</label><br>
+      <label for="timeframe">Timeframe</label><br>
       <select id="timeframe" class="btn" style="background:#0d1117;">
         {% for tf in timeframes %}<option value="{{ tf }}">{{ tf }}</option>{% endfor %}
       </select>
     </div>
     <div>
-      <label>Start date</label><br>
+      <label for="start_date">Start date</label><br>
       <input id="start_date" type="date" class="btn" style="background:#0d1117;">
     </div>
     <div>
-      <label>End date</label><br>
+      <label for="end_date">End date</label><br>
       <input id="end_date" type="date" class="btn" style="background:#0d1117;">
     </div>
     <div>
-      <label>Objective</label><br>
+      <label for="objective">Objective</label><br>
       <select id="objective" class="btn" style="background:#0d1117;">
         {% for o in objectives %}<option value="{{ o }}">{{ o }}</option>{% endfor %}
       </select>
     </div>
     <div>
-      <label>Trials</label><br>
+      <label for="n_trials">Trials</label><br>
       <input id="n_trials" type="number" value="30" min="1" class="btn" style="width:90px;background:#0d1117;">
     </div>
     <div>
-      <label>Min trades</label><br>
+      <label for="min_trades">Min trades</label><br>
       <input id="min_trades" type="number" value="20" min="1" class="btn" style="width:90px;background:#0d1117;">
     </div>
   </div>
@@ -70,7 +70,7 @@
 
   <div class="filter-bar" style="align-items:flex-end; gap:12px;">
     <div>
-      <label>Passcode</label><br>
+      <label for="passcode">Passcode</label><br>
       <input id="passcode" type="password" class="btn" style="width:180px;background:#0d1117;">
     </div>
     <button id="runBtn" class="btn btn-primary">Run Simulation</button>
@@ -78,7 +78,7 @@
     <button id="applyBtn" class="btn" style="display:none;">Apply as current</button>
   </div>
 
-  <div id="statusBox" style="margin-top:12px; color:#8b949e;"></div>
+  <div id="statusBox" style="margin-top:12px; color:#8b949e;" role="status" aria-live="polite"></div>
   <div style="margin-top:8px; border:1px solid #30363d; border-radius:6px; overflow:hidden;">
     <div id="progressBar" style="height:12px; width:0%; background:#58a6ff;"></div>
   </div>
@@ -109,6 +109,15 @@
     return v;
   }
 
+  function esc(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   function collectLockedAndSwept() {
     const swept = [];
     const locked = {};
@@ -129,16 +138,16 @@
     Object.keys(results).forEach(symbol => {
       const r = results[symbol] || {};
       if (r.error) {
-        rows.push(`<tr><td>${symbol}</td><td colspan="5" style="color:#f85149;">${r.error}</td></tr>`);
+        rows.push(`<tr><td>${esc(symbol)}</td><td colspan="5" style="color:#f85149;">${esc(r.error)}</td></tr>`);
         return;
       }
       rows.push(`<tr>
-        <td>${symbol}</td>
-        <td>${(r.best_value ?? '').toString()}</td>
+        <td>${esc(symbol)}</td>
+        <td>${esc((r.best_value ?? '').toString())}</td>
         <td>${((r.in_sample||{}).win_rate ?? 0).toFixed ? ((r.in_sample||{}).win_rate ?? 0).toFixed(4) : (r.in_sample||{}).win_rate}</td>
         <td>${((r.out_of_sample||{}).win_rate ?? 0).toFixed ? ((r.out_of_sample||{}).win_rate ?? 0).toFixed(4) : (r.out_of_sample||{}).win_rate}</td>
         <td>${((r.walk_forward||{}).consistency ?? 0).toFixed ? ((r.walk_forward||{}).consistency ?? 0).toFixed(4) : (r.walk_forward||{}).consistency}</td>
-        <td><details><summary>params</summary><pre style="white-space:pre-wrap;">${JSON.stringify(r.best_params || {}, null, 2)}</pre></details></td>
+        <td><details><summary>params</summary><pre style="white-space:pre-wrap;">${esc(JSON.stringify(r.best_params || {}, null, 2))}</pre></details></td>
       </tr>`);
     });
     box.innerHTML = rows.length ? `<div class="table-responsive"><table><thead><tr><th>Symbol</th><th>Best value</th><th>IS win</th><th>OOS win</th><th>Consistency</th><th>Best params</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>` : '<div class="empty-state">No results yet.</div>';
@@ -193,7 +202,12 @@
       body: JSON.stringify(payload),
     });
     if (!res.ok) {
-      $('statusBox').textContent = `Start failed: ${await res.text()}`;
+      let msg = await res.text();
+      try {
+        const err = JSON.parse(msg);
+        msg = err.detail || msg;
+      } catch (_) {}
+      $('statusBox').textContent = `Start failed: ${msg}`;
       $('runBtn').disabled = false;
       $('cancelBtn').style.display = 'none';
       return;
@@ -221,8 +235,14 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code: $('passcode').value }),
     });
-    const out = await res.json();
-    $('statusBox').textContent = `Applied results: ${(out.applied || []).length}`;
+    const body = await res.text();
+    let parsed = {};
+    try { parsed = JSON.parse(body); } catch (_) {}
+    if (!res.ok) {
+      $('statusBox').textContent = `Apply failed: ${parsed.detail || body}`;
+      return;
+    }
+    $('statusBox').textContent = `Applied results: ${((parsed.applied || []).length)}`;
   });
 })();
 </script>

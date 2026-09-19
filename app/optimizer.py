@@ -106,9 +106,12 @@ def _objective_fn(
     suggest_params_fn: Callable[[optuna.Trial], dict[str, Any]] | None = None,
     base_params: dict[str, Any] | None = None,
 ) -> float:
-    params = dict(base_params or DEFAULT_SIGNAL_PARAMS)
-    suggested = _suggest_params(trial) if suggest_params_fn is None else suggest_params_fn(trial)
-    params.update(suggested)
+    if suggest_params_fn is None and base_params is None:
+        params = _suggest_params(trial)
+    else:
+        params = dict(base_params or DEFAULT_SIGNAL_PARAMS)
+        suggested = _suggest_params(trial) if suggest_params_fn is None else suggest_params_fn(trial)
+        params.update(suggested)
     result = run_backtest(
         high,
         low,
@@ -171,7 +174,7 @@ def run_optimization(
             objective,
             min_trades,
             suggest_params_fn,
-            base_params,
+            resolved_base if (suggest_params_fn is not None or base_params is not None) else None,
         ),
         n_trials=n_trials,
         catch=(Exception,),

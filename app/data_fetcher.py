@@ -52,6 +52,25 @@ _MAX_RANGE_BARS = {
 _CRYPTO_BASE = {"BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", "DOGEUSDT"}
 
 
+def _normalize_ohlcv(df: pd.DataFrame) -> Optional[pd.DataFrame]:
+    col_map = {str(c).lower(): c for c in df.columns}
+    open_col = col_map.get("open")
+    high_col = col_map.get("high")
+    low_col = col_map.get("low")
+    close_col = col_map.get("close") or col_map.get("adj close")
+    volume_col = col_map.get("volume")
+    if not all([open_col, high_col, low_col, close_col, volume_col]):
+        return None
+    out = df.rename(columns={
+        open_col: "open",
+        high_col: "high",
+        low_col: "low",
+        close_col: "close",
+        volume_col: "volume",
+    })
+    return out[["open", "high", "low", "close", "volume"]].copy()
+
+
 def _cache_key(symbol: str, timeframe: str) -> str:
     return f"{symbol}:{timeframe}"
 
@@ -105,8 +124,10 @@ def _fetch_yfinance(symbol: str, timeframe: str) -> Optional[pd.DataFrame]:
             logger.warning("yfinance returned empty data for %s %s (both period and date-range)", symbol, timeframe)
             return None
 
-        df = df.rename(columns={"Open": "open", "High": "high", "Low": "low", "Close": "close", "Volume": "volume"})
-        df = df[["open", "high", "low", "close", "volume"]].copy()
+        df = _normalize_ohlcv(df)
+        if df is None:
+            logger.warning("yfinance returned unexpected columns for %s %s", symbol, timeframe)
+            return None
         df.index = pd.to_datetime(df.index, utc=True)
         df = df.dropna()
 
@@ -137,8 +158,10 @@ def _fetch_yfinance_range(symbol: str, timeframe: str, start: datetime, end: dat
         df = ticker.history(start=start, end=end, interval=yf_tf, auto_adjust=True)
         if df.empty:
             return None
-        df = df.rename(columns={"Open": "open", "High": "high", "Low": "low", "Close": "close", "Volume": "volume"})
-        df = df[["open", "high", "low", "close", "volume"]].copy()
+        df = _normalize_ohlcv(df)
+        if df is None:
+            logger.warning("yfinance range returned unexpected columns for %s %s", symbol, timeframe)
+            return None
         df.index = pd.to_datetime(df.index, utc=True)
         df = df.dropna()
         if timeframe == "4h":

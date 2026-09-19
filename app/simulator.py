@@ -240,12 +240,27 @@ def run_simulation(sim_id: int) -> None:
         finally:
             local.close()
 
+    def _bump_progress(amount: int):
+        if amount <= 0:
+            return
+        local = factory()
+        try:
+            current = local.query(SimulationRun).filter(SimulationRun.id == sim_id).first()
+            if current is None:
+                return
+            current.progress_current = min((current.progress_current or 0) + amount, current.progress_total or 0)
+            local.commit()
+        finally:
+            local.close()
+
     try:
         base_params = _build_base_params(locked_params)
         suggest_fn = _build_suggest_fn(base_params, swept_params, locked_params)
+        cancelled_early = False
 
         for symbol in symbols:
             if _cancel_requested():
+                cancelled_early = True
                 break
 
             update_session = factory()
@@ -257,10 +272,12 @@ def run_simulation(sim_id: int) -> None:
             finally:
                 update_session.close()
 
+            ran_optimization = False
             try:
                 df = fetch_ohlcv_range(symbol, run_timeframe, run_start, run_end)
                 if df is None or df.empty or len(df) < 30:
                     all_results[symbol] = {"error": "No historical OHLCV available for selected range"}
+                    _bump_progress(run_trials)
                     continue
 
                 ins_df, oos_df = _split_sample(df)
@@ -286,6 +303,10 @@ def run_simulation(sim_id: int) -> None:
                     trial_complete_callback=_on_trial_complete,
                     stop_requested=_cancel_requested,
                 )
+                ran_optimization = True
+                if int(opt_result.get("n_trials_completed", 0)) == 0:
+                    all_results[symbol] = {"error": f"No completed trials (all pruned; min_trades={min_trades})"}
+                    continue
                 best_params = opt_result["best_params"]
                 in_sample = opt_result["best_backtest"]
 
@@ -328,6 +349,8 @@ def run_simulation(sim_id: int) -> None:
             except Exception as symbol_exc:
                 logger.error("Simulation symbol failed: %s %s", symbol, symbol_exc)
                 all_results[symbol] = {"error": str(symbol_exc)}
+                if not ran_optimization:
+                    _bump_progress(run_trials)
 
             update_session = factory()
             try:
@@ -346,7 +369,7 @@ def run_simulation(sim_id: int) -> None:
                 current.results = json.dumps(all_results)
                 current.best_value = _safe_round(best_seen)
                 current.current_symbol = None
-                if current.cancel_requested:
+                if cancelled_early:
                     current.status = "cancelled"
                 else:
                     current.status = "completed"
@@ -390,30 +413,61 @@ def apply_simulation_results(sim_id: int) -> dict[str, Any]:
             best_params = payload.get("best_params") or {}
             in_sample = payload.get("in_sample") or {}
             wf = payload.get("walk_forward") or {}
+            record_kwargs = {k: best_params.get(k) for k in OptimizationResult.__table__.columns.keys() if k in best_params}
 
-            session.execute(
-                update(OptimizationResult)
-                .where(
+            current_row = (
+                session.query(OptimizationResult)
+                .filter(
                     OptimizationResult.symbol == symbol,
                     OptimizationResult.timeframe == run.timeframe,
+                    OptimizationResult.is_current == True,
                 )
-                .values(is_current=False)
+                .first()
             )
+            if current_row is None:
+                existing_row = (
+                    session.query(OptimizationResult)
+                    .filter(
+                        OptimizationResult.symbol == symbol,
+                        OptimizationResult.timeframe == run.timeframe,
+                    )
+                    .order_by(OptimizationResult.id.desc())
+                    .first()
+                )
+                if existing_row is None:
+                    current_row = OptimizationResult(symbol=symbol, timeframe=run.timeframe)
+                    session.add(current_row)
+                else:
+                    current_row = existing_row
+                session.execute(
+                    update(OptimizationResult)
+                    .where(
+                        OptimizationResult.symbol == symbol,
+                        OptimizationResult.timeframe == run.timeframe,
+                        OptimizationResult.id != current_row.id,
+                    )
+                    .values(is_current=False)
+                )
+            else:
+                session.execute(
+                    update(OptimizationResult)
+                    .where(
+                        OptimizationResult.symbol == symbol,
+                        OptimizationResult.timeframe == run.timeframe,
+                        OptimizationResult.id != current_row.id,
+                    )
+                    .values(is_current=False)
+                )
 
-            record_kwargs = {k: best_params.get(k) for k in OptimizationResult.__table__.columns.keys() if k in best_params}
-            rec = OptimizationResult(
-                symbol=symbol,
-                timeframe=run.timeframe,
-                win_rate=float(in_sample.get("win_rate", 0.0)),
-                tp2_rate=float(in_sample.get("tp2_rate", 0.0)),
-                sl_rate=float(in_sample.get("sl_rate", 0.0)),
-                total_signals=int(in_sample.get("signals", 0)),
-                walk_forward_score=float(wf.get("score", 0.0)),
-                consistency_score=float(wf.get("consistency", 0.0)),
-                is_current=True,
-                **record_kwargs,
-            )
-            session.add(rec)
+            current_row.win_rate = float(in_sample.get("win_rate", 0.0))
+            current_row.tp2_rate = float(in_sample.get("tp2_rate", 0.0))
+            current_row.sl_rate = float(in_sample.get("sl_rate", 0.0))
+            current_row.total_signals = int(in_sample.get("signals", 0))
+            current_row.walk_forward_score = float(wf.get("score", 0.0))
+            current_row.consistency_score = float(wf.get("consistency", 0.0))
+            current_row.is_current = True
+            for key, value in record_kwargs.items():
+                setattr(current_row, key, value)
             applied.append({"symbol": symbol, "timeframe": run.timeframe})
 
         session.commit()

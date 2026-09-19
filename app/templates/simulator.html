@@ -3,6 +3,7 @@
 {% block content %}
 <div class="card">
   <h2 class="card-title">Simulator</h2>
+  <form id="simulatorForm">
   <div class="filter-bar" style="align-items:flex-end; gap:12px;">
     <div>
       <label for="asset_class">Asset class</label><br>
@@ -83,9 +84,9 @@
       <label for="passcode">Passcode</label><br>
       <input id="passcode" type="password" class="btn" style="width:180px;background:#0d1117;">
     </div>
-    <button id="runBtn" class="btn btn-primary">Run Simulation</button>
-    <button id="cancelBtn" class="btn" style="display:none;">Cancel</button>
-    <button id="applyBtn" class="btn" style="display:none;">Apply as current</button>
+    <button id="runBtn" type="submit" class="btn btn-primary">Run Simulation</button>
+    <button id="cancelBtn" type="button" class="btn" style="display:none;">Cancel</button>
+    <button id="applyBtn" type="button" class="btn" style="display:none;">Apply as current</button>
   </div>
 
   <div id="formErrors" style="margin-top:12px; color:#f85149;" aria-live="polite"></div>
@@ -93,6 +94,7 @@
   <div style="margin-top:8px; border:1px solid #30363d; border-radius:6px; overflow:hidden;">
     <div id="progressBar" role="progressbar" aria-label="Simulation progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" style="height:12px; width:0%; background:#58a6ff;"></div>
   </div>
+  </form>
 </div>
 
 <div class="card">
@@ -167,6 +169,10 @@
     $('formErrors').innerHTML = errors.length ? errors.map(err => `<div>${esc(err)}</div>`).join('') : '';
   }
 
+  function refreshValidation() {
+    if ($('formErrors').textContent.trim()) validateForm();
+  }
+
   function renderSelectedSymbols() {
     const box = $('selected_symbols');
     const symbols = selectedSymbols().sort();
@@ -185,6 +191,7 @@
         selected.delete(btn.dataset.removeSymbol);
         renderSelectedSymbols();
         renderClassSymbols();
+        refreshValidation();
       });
     });
   }
@@ -221,6 +228,7 @@
         if (input.checked) selected.add(input.value);
         else selected.delete(input.value);
         renderSelectedSymbols();
+        refreshValidation();
       });
     });
   }
@@ -307,8 +315,13 @@
   renderClassSymbols();
   renderSelectedSymbols();
   $('asset_class').addEventListener('change', renderClassSymbols);
+  ['extra_tickers', 'timeframe', 'start_date', 'end_date', 'n_trials', 'min_trades'].forEach(id => {
+    $(id).addEventListener('input', refreshValidation);
+    $(id).addEventListener('change', refreshValidation);
+  });
 
-  $('runBtn').addEventListener('click', async () => {
+  $('simulatorForm').addEventListener('submit', async (event) => {
+    event.preventDefault();
     if (!validateForm()) return;
     const { swept, locked } = collectLockedAndSwept();
 

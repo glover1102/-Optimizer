@@ -1,5 +1,5 @@
 """
-APScheduler-based periodic optimization runner.
+APScheduler-based periodic optimization runner for KLS+MoM.
 
 Runs the full watchlist optimization every OPTIMIZATION_INTERVAL_HOURS hours.
 Skips symbols that were recently optimized (within the last interval) unless
@@ -23,7 +23,7 @@ _next_run: Optional[datetime] = None
 
 def _optimize_symbol(symbol: str, timeframe: str, db_session) -> None:
     """Run full optimization pipeline for a single symbol/timeframe pair."""
-    from app.data_fetcher import get_numpy_arrays
+    from app.data_fetcher import fetch_ohlcv
     from app.optimizer import run_optimization
     from app.walk_forward import run_walk_forward
     from app.regime_detector import detect_regime
@@ -31,19 +31,24 @@ def _optimize_symbol(symbol: str, timeframe: str, db_session) -> None:
 
     logger.info("Optimizing %s %s …", symbol, timeframe)
 
-    arrays = get_numpy_arrays(symbol, timeframe)
-    if arrays is None:
+    df = fetch_ohlcv(symbol, timeframe)
+    if df is None or df.empty:
         logger.warning("No data for %s %s — skipping", symbol, timeframe)
         return
 
-    high, low, close = arrays
+    open_ = df["open"].to_numpy(dtype=float)
+    high = df["high"].to_numpy(dtype=float)
+    low = df["low"].to_numpy(dtype=float)
+    close = df["close"].to_numpy(dtype=float)
+    volume = df["volume"].to_numpy(dtype=float)
+    timestamps = df.index
 
     # Detect regime
     regime_info = detect_regime(high, low, close)
 
     # Run Bayesian optimization
     try:
-        opt_result = run_optimization(high, low, close, n_trials=DEFAULT_TRIALS)
+        opt_result = run_optimization(high, low, close, volume, open_=open_, timestamps=timestamps, timeframe=timeframe, n_trials=DEFAULT_TRIALS)
     except Exception as exc:
         logger.error("Optimization failed for %s %s: %s", symbol, timeframe, exc)
         return
@@ -52,7 +57,7 @@ def _optimize_symbol(symbol: str, timeframe: str, db_session) -> None:
     best_bt = opt_result["best_backtest"]
 
     # Walk-forward validation
-    wf_result = run_walk_forward(high, low, close, best_params)
+    wf_result = run_walk_forward(high, low, close, volume, best_params, open_=open_, timestamps=timestamps, timeframe=timeframe)
 
     # Confidence scoring
     wf_scores = [
@@ -80,14 +85,10 @@ def _optimize_symbol(symbol: str, timeframe: str, db_session) -> None:
             .values(is_current=False)
         )
 
+        record_kwargs = {key: best_params.get(key) for key in OptimizationResult.__table__.columns.keys() if key in best_params}
         record = OptimizationResult(
             symbol=symbol,
             timeframe=timeframe,
-            left_bars=best_params.get("left_bars"),
-            right_bars=best_params.get("right_bars"),
-            offset=best_params.get("offset"),
-            atr_multiplier=best_params.get("atr_multiplier"),
-            atr_period=best_params.get("atr_period"),
             win_rate=best_bt["win_rate"],
             tp2_rate=best_bt["tp2_rate"],
             tp3_rate=best_bt["tp3_rate"],
@@ -99,6 +100,7 @@ def _optimize_symbol(symbol: str, timeframe: str, db_session) -> None:
             confidence_score=score["confidence_score"],
             regime=regime_info["regime"],
             is_current=True,
+            **record_kwargs,
         )
         db_session.add(record)
         db_session.commit()
@@ -119,11 +121,10 @@ def _optimize_symbol(symbol: str, timeframe: str, db_session) -> None:
                 "tp2_rate": best_bt["tp2_rate"],
                 "tp3_rate": best_bt["tp3_rate"],
                 "sl_rate": best_bt["sl_rate"],
-                "left_bars": best_params.get("left_bars"),
-                "right_bars": best_params.get("right_bars"),
-                "offset": best_params.get("offset"),
-                "atr_multiplier": best_params.get("atr_multiplier"),
-                "atr_period": best_params.get("atr_period"),
+                "atr_length": best_params.get("atr_length"),
+                "sl_mult": best_params.get("sl_mult"),
+                "tp2_rr": best_params.get("tp2_rr"),
+                "resolve_mode": best_params.get("resolve_mode"),
                 "regime": regime_info["regime"],
                 "walk_forward_score": wf_result["walk_forward_score"],
             })
@@ -245,6 +246,7 @@ def _run_signal_generation() -> None:
                         tp1_price=sig.get("tp1_price"),
                         tp2_price=sig.get("tp2_price"),
                         tp3_price=sig.get("tp3_price"),
+                        tp4_price=sig.get("tp4_price"),
                         regime=sig.get("regime"),
                         entry_mode=sig.get("entry_mode"),
                         is_confluence=sig.get("is_confluence", False),

@@ -11,24 +11,24 @@
     <div class="card-title">{{ result.symbol }} / {{ result.timeframe }} — Best Parameters</div>
     <div class="stat-grid">
         <div class="stat-card">
-            <div class="stat-label">Left Bars</div>
-            <div class="stat-value">{{ result.left_bars }}</div>
+            <div class="stat-label">ATR Length</div>
+            <div class="stat-value">{{ result.atr_length }}</div>
         </div>
         <div class="stat-card">
-            <div class="stat-label">Right Bars</div>
-            <div class="stat-value">{{ result.right_bars }}</div>
+            <div class="stat-label">SL Mult</div>
+            <div class="stat-value">{{ "%.2f" | format(result.sl_mult) }}</div>
         </div>
         <div class="stat-card">
-            <div class="stat-label">Offset</div>
-            <div class="stat-value">{{ "%.2f" | format(result.offset) }}</div>
+            <div class="stat-label">TP2 RR</div>
+            <div class="stat-value">{{ "%.2f" | format(result.tp2_rr) }}</div>
         </div>
         <div class="stat-card">
-            <div class="stat-label">ATR Multiplier</div>
-            <div class="stat-value">{{ "%.2f" | format(result.atr_multiplier) }}</div>
+            <div class="stat-label">Resolve Mode</div>
+            <div class="stat-value">{{ result.resolve_mode }}</div>
         </div>
         <div class="stat-card">
-            <div class="stat-label">ATR Period</div>
-            <div class="stat-value">{{ result.atr_period }}</div>
+            <div class="stat-label">Filter Mode</div>
+            <div class="stat-value">{{ result.filt_mode }}</div>
         </div>
         <div class="stat-card">
             <div class="stat-label">Regime</div>

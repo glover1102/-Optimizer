@@ -2,7 +2,7 @@
 Discord webhook notifier for high-grade optimization results.
 
 Sends a rich embed to the configured Discord webhook URL whenever an
-optimization completes with a confidence grade of A or B.  All errors
+optimization completes with a confidence grade of A or B. All errors
 are caught and logged — this module must never crash the optimizer.
 """
 
@@ -64,8 +64,8 @@ def notify_optimization_result(result_dict: dict) -> None:
     result_dict:
         Dictionary containing optimization result fields.  Expected keys:
         symbol, timeframe, confidence_grade, confidence_score, win_rate,
-        tp2_rate, tp3_rate, sl_rate, left_bars, right_bars, offset,
-        atr_multiplier, atr_period, regime, walk_forward_score.
+        tp2_rate, tp3_rate, sl_rate, atr_length, sl_mult, tp2_rr,
+        resolve_mode, regime, walk_forward_score.
     """
     try:
         webhook_url = _get_webhook_url()
@@ -84,11 +84,10 @@ def notify_optimization_result(result_dict: dict) -> None:
         tp2_rate = result_dict.get("tp2_rate", 0)
         tp3_rate = result_dict.get("tp3_rate", 0)
         sl_rate = result_dict.get("sl_rate", 0)
-        left_bars = result_dict.get("left_bars", "?")
-        right_bars = result_dict.get("right_bars", "?")
-        offset = result_dict.get("offset", 0)
-        atr_multiplier = result_dict.get("atr_multiplier", 0)
-        atr_period = result_dict.get("atr_period", "?")
+        atr_length = result_dict.get("atr_length", "?")
+        sl_mult = result_dict.get("sl_mult", 0)
+        tp2_rr = result_dict.get("tp2_rr", 0)
+        resolve_mode = result_dict.get("resolve_mode", "?")
         regime = result_dict.get("regime", "unknown")
         wf_score = result_dict.get("walk_forward_score", 0)
 
@@ -128,10 +127,10 @@ def notify_optimization_result(result_dict: dict) -> None:
                 {
                     "name": "Params",
                     "value": (
-                        f"LB={left_bars} RB={right_bars} | "
-                        f"Offset={offset:.2f} | "
-                        f"Mult={atr_multiplier:.2f} | "
-                        f"ATR Period={atr_period}"
+                        f"ATR={atr_length} | "
+                        f"SL×ATR={sl_mult:.2f} | "
+                        f"TP2 RR={tp2_rr:.2f} | "
+                        f"Resolve={resolve_mode}"
                     ),
                     "inline": False,
                 },
@@ -204,7 +203,7 @@ def notify_signal(symbol: str, timeframe: str, signal_dict: dict) -> None:
         strength = signal_dict.get("strength", 0)
         confidence = signal_dict.get("confidence", 0.0)
         regime = signal_dict.get("regime", "unknown")
-        entry_mode = signal_dict.get("entry_mode", "Pivot")
+        entry_mode = signal_dict.get("entry_mode", "KeyLevel")
         is_confluence = signal_dict.get("is_confluence", False)
 
         def _fmt(v):

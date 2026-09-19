@@ -1,11 +1,4 @@
-from sqlalchemy import (
-    Boolean,
-    Column,
-    DateTime,
-    Float,
-    Integer,
-    String,
-)
+from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
 
@@ -20,11 +13,62 @@ class OptimizationResult(Base):
     id = Column(Integer, primary_key=True, index=True)
     symbol = Column(String, index=True, nullable=False)
     timeframe = Column(String, index=True, nullable=False)
-    left_bars = Column(Integer)
-    right_bars = Column(Integer)
-    offset = Column(Float)
-    atr_multiplier = Column(Float)
-    atr_period = Column(Integer)
+
+    enable_pdl = Column(Boolean)
+    enable_pdo = Column(Boolean)
+    enable_pdc = Column(Boolean)
+    enable_pdh = Column(Boolean)
+    enable_pwh = Column(Boolean)
+    enable_pwl = Column(Boolean)
+    enable_open = Column(Boolean)
+
+    or1_enabled = Column(Boolean)
+    or1_minutes = Column(Integer)
+    or1_ext_enabled = Column(Boolean)
+    or2_enabled = Column(Boolean)
+    or2_minutes = Column(Integer)
+    or2_ext_enabled = Column(Boolean)
+    or3_enabled = Column(Boolean)
+    or3_minutes = Column(Integer)
+    or3_ext_enabled = Column(Boolean)
+    or4_enabled = Column(Boolean)
+    or4_minutes = Column(Integer)
+    or4_ext_enabled = Column(Boolean)
+
+    atr_length = Column(Integer)
+    atr_smoothing = Column(String)
+    sl_mult = Column(Float)
+    tp1_rr = Column(Float)
+    tp2_rr = Column(Float)
+    tp3_rr = Column(Float)
+    tp4_rr = Column(Float)
+    be_after_tp = Column(String)
+    be_off_ticks = Column(Float)
+    runner_tgt = Column(String)
+    clear_on_tp = Column(Boolean)
+    clear_tp_sel = Column(String)
+    resolve_mode = Column(String)
+    filt_mode = Column(String)
+    entry_at_level = Column(Boolean)
+    re_arm = Column(Boolean)
+
+    use_structure_15m = Column(Boolean)
+    use_structure_1h = Column(Boolean)
+    use_structure_4h = Column(Boolean)
+    use_fmom = Column(Boolean)
+    use_fvol = Column(Boolean)
+    use_frsi = Column(Boolean)
+    use_fmacd = Column(Boolean)
+    use_fvwap = Column(Boolean)
+    use_fatr = Column(Boolean)
+    fvol_len = Column(Integer)
+    fvol_mult = Column(Float)
+    fvol_ma_type = Column(String)
+    rsi_length = Column(Integer)
+    rsi_neutral = Column(Float)
+    fatr_baseline = Column(Integer)
+    fatr_allow = Column(String)
+
     win_rate = Column(Float)
     tp2_rate = Column(Float)
     tp3_rate = Column(Float)
@@ -68,24 +112,24 @@ class SignalRecommendation(Base):
     id = Column(Integer, primary_key=True, index=True)
     symbol = Column(String, index=True, nullable=False)
     timeframe = Column(String, index=True, nullable=False)
-    action = Column(String, nullable=False)       # "BUY", "SELL", "HOLD"
-    strength = Column(Integer)                    # 0-4
+    action = Column(String, nullable=False)
+    strength = Column(Integer)
     entry_price = Column(Float)
     sl_price = Column(Float)
     tp1_price = Column(Float)
     tp2_price = Column(Float)
     tp3_price = Column(Float)
+    tp4_price = Column(Float)
     regime = Column(String)
-    entry_mode = Column(String)                   # "Pivot", "Crossover", "Hybrid"
+    entry_mode = Column(String)
     is_confluence = Column(Boolean, default=False)
     confidence = Column(Float)
-    filters_used = Column(String)                 # JSON string of active filters
+    filters_used = Column(String)
     created_at = Column(DateTime, default=func.now())
     is_current = Column(Boolean, default=True)
 
-    # Outcome tracking
-    outcome = Column(String, nullable=True)       # "tp1_hit", "tp2_hit", "tp3_hit", "sl_hit", "expired"
-    outcome_at = Column(DateTime, nullable=True)  # when outcome was determined
-    outcome_price = Column(Float, nullable=True)  # price at outcome
-    highest_tp_hit = Column(Integer, default=0)   # highest TP level hit (0, 1, 2, 3)
-    pnl_percent = Column(Float, nullable=True)    # percentage P&L
+    outcome = Column(String, nullable=True)
+    outcome_at = Column(DateTime, nullable=True)
+    outcome_price = Column(Float, nullable=True)
+    highest_tp_hit = Column(Integer, default=0)
+    pnl_percent = Column(Float, nullable=True)

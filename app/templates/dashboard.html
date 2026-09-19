@@ -167,7 +167,7 @@
         <thead>
             <tr>
                 <th>Symbol</th><th>TF</th><th>Class</th>
-                <th>LB / RB</th><th>Offset</th><th>Mult</th><th>ATR Per</th>
+                <th>ATR Len</th><th>SL Mult</th><th>TP2 RR</th><th>Resolve</th>
                 <th>Signals</th><th>Win%</th><th>TP2%</th><th>SL%</th>
                 <th>Consistency</th><th>Score</th><th>Grade</th><th>Regime</th><th>Current</th><th></th>
             </tr>
@@ -178,10 +178,10 @@
                 <td><a href="/results/{{ r.symbol }}/{{ r.timeframe }}">{{ r.symbol }}</a></td>
                 <td>{{ r.timeframe }}</td>
                 <td><span class="badge badge-{{ r.asset_class }}">{{ r.asset_class }}</span></td>
-                <td>{{ r.left_bars }} / {{ r.right_bars }}</td>
-                <td>{{ "%.2f" | format(r.offset) }}</td>
-                <td>{{ "%.2f" | format(r.atr_multiplier) }}</td>
-                <td>{{ r.atr_period }}</td>
+                <td>{{ r.atr_length }}</td>
+                <td>{{ "%.2f" | format(r.sl_mult) }}</td>
+                <td>{{ "%.2f" | format(r.tp2_rr) }}</td>
+                <td>{{ r.resolve_mode }}</td>
                 <td>{{ r.total_signals }}</td>
                 <td>{{ "%.1f" | format(r.win_rate * 100) }}%</td>
                 <td>{{ "%.1f" | format(r.tp2_rate * 100) }}%</td>
@@ -218,7 +218,7 @@
         <thead>
             <tr>
                 <th>Symbol</th><th>TF</th><th>Class</th>
-                <th>LB / RB</th><th>Offset</th><th>Mult</th><th>ATR Per</th>
+                <th>ATR Len</th><th>SL Mult</th><th>TP2 RR</th><th>Resolve</th>
                 <th>Signals</th><th>Win%</th><th>TP2%</th><th>TP3%</th><th>SL%</th>
                 <th>WF Score</th><th>Score</th><th>Grade</th>
                 <th>Regime</th><th>Updated</th><th></th>
@@ -230,10 +230,10 @@
                 <td><a href="/results/{{ r.symbol }}/{{ r.timeframe }}">{{ r.symbol }}</a></td>
                 <td>{{ r.timeframe }}</td>
                 <td><span class="badge badge-{{ r.asset_class }}">{{ r.asset_class }}</span></td>
-                <td>{{ r.left_bars }} / {{ r.right_bars }}</td>
-                <td>{{ "%.2f" | format(r.offset) }}</td>
-                <td>{{ "%.2f" | format(r.atr_multiplier) }}</td>
-                <td>{{ r.atr_period }}</td>
+                <td>{{ r.atr_length }}</td>
+                <td>{{ "%.2f" | format(r.sl_mult) }}</td>
+                <td>{{ "%.2f" | format(r.tp2_rr) }}</td>
+                <td>{{ r.resolve_mode }}</td>
                 <td>{{ r.total_signals }}</td>
                 <td>{{ "%.1f" | format(r.win_rate * 100) }}%</td>
                 <td>{{ "%.1f" | format(r.tp2_rate * 100) }}%</td>

@@ -9,7 +9,7 @@
       <select id="asset_class" class="btn" style="min-width:180px; background:#0d1117;"></select>
     </div>
     <div>
-      <label for="class_symbols">Tickers in class</label><br>
+      <label id="class_symbols_label" for="class_symbols">Tickers in class</label><br>
       <div id="class_symbols" style="min-width:280px; min-height:150px; max-height:150px; overflow:auto; padding:8px; background:#0d1117; color:#e6edf3; border:1px solid #30363d; border-radius:6px;"></div>
       <div style="margin-top:6px; color:#8b949e; font-size:12px;">Choose a class, then tick one or more symbols.</div>
     </div>
@@ -177,7 +177,7 @@
     box.innerHTML = symbols.map(symbol => `
       <span style="display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border:1px solid #30363d; border-radius:999px; background:#0d1117;">
         <span>${esc(symbol)}</span>
-        <button type="button" data-remove-symbol="${esc(symbol)}" class="btn" style="padding:2px 6px;">×</button>
+        <button type="button" data-remove-symbol="${esc(symbol)}" aria-label="Remove ${esc(symbol)}" class="btn" style="padding:2px 6px;">×</button>
       </span>
     `).join('');
     box.querySelectorAll('[data-remove-symbol]').forEach(btn => {
@@ -191,6 +191,12 @@
 
   function renderAssetClasses() {
     const select = $('asset_class');
+    if (!watchlistGroups.length) {
+      select.innerHTML = '<option value="" selected>No asset classes available</option>';
+      select.disabled = true;
+      return;
+    }
+    select.disabled = false;
     select.innerHTML = watchlistGroups.map((group, idx) => `
       <option value="${esc(group.asset_class)}" ${idx === 0 ? 'selected' : ''}>${esc(group.asset_class.charAt(0).toUpperCase() + group.asset_class.slice(1))}</option>
     `).join('');
@@ -199,12 +205,17 @@
   function renderClassSymbols() {
     const assetClass = $('asset_class').value;
     const group = watchlistGroups.find(item => item.asset_class === assetClass) || { symbols: [] };
-    $('class_symbols').innerHTML = group.symbols.length ? group.symbols.map(symbol => `
-      <label style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-        <input type="checkbox" value="${esc(symbol)}" ${selected.has(symbol) ? 'checked' : ''}>
-        <span>${esc(symbol)}</span>
-      </label>
-    `).join('') : '<div style="color:#8b949e;">No symbols available.</div>';
+    $('class_symbols').innerHTML = group.symbols.length ? `
+      <fieldset style="border:0; margin:0; padding:0;" aria-labelledby="class_symbols_label">
+        <legend style="position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip:rect(0, 0, 0, 0); border:0;">Tickers in selected asset class</legend>
+        ${group.symbols.map(symbol => `
+          <label style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+            <input type="checkbox" value="${esc(symbol)}" ${selected.has(symbol) ? 'checked' : ''}>
+            <span>${esc(symbol)}</span>
+          </label>
+        `).join('')}
+      </fieldset>
+    ` : '<div style="color:#8b949e;">No symbols available.</div>';
     $('class_symbols').querySelectorAll('input[type="checkbox"]').forEach(input => {
       input.addEventListener('change', () => {
         if (input.checked) selected.add(input.value);

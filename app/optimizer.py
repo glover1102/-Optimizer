@@ -78,6 +78,13 @@ def compute_max_drawdown_r(result: dict[str, Any], params: dict[str, Any]) -> fl
     return float(np.max(running_peak - equity_curve))
 
 
+def _blended_profit_factor_value(result: dict[str, Any], params: dict[str, Any]) -> float:
+    profit_factor = compute_profit_factor(result, params)
+    if np.isinf(profit_factor):
+        return float(min(10.0, 1.0 + max(0.0, compute_total_r(result, params))))
+    return float(profit_factor)
+
+
 def _suggest_params(trial: optuna.Trial) -> dict[str, Any]:
     p = dict(DEFAULT_SIGNAL_PARAMS)
     p.update(
@@ -137,9 +144,7 @@ def _objective_score(result: dict[str, Any], objective: str, params: dict[str, A
     if objective == "expectancy_minus_dd":
         return compute_expectancy_r(result, params) - (_DD_BLEND_WEIGHT * compute_max_drawdown_r(result, params))
     if objective == "profit_factor_minus_dd":
-        val = compute_profit_factor(result, params)
-        capped = 999.0 if np.isinf(val) else float(val)
-        return capped - (_DD_BLEND_WEIGHT * compute_max_drawdown_r(result, params))
+        return _blended_profit_factor_value(result, params) - (_DD_BLEND_WEIGHT * compute_max_drawdown_r(result, params))
     return compute_expectancy_r(result, params)
 
 

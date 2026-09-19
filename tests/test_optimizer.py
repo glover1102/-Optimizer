@@ -183,3 +183,15 @@ def test_sharpe_returns_zero_for_small_or_flat_samples():
         {"trades": [{"highest_tp_hit": 1, "outcome": "tp1_hit"}, {"highest_tp_hit": 1, "outcome": "tp1_hit"}]},
         params,
     ) == 0.0
+
+
+def test_profit_factor_minus_drawdown_uses_finite_fallback_for_infinite_pf():
+    params = {"tp1_rr": 1.0}
+    result = {
+        "trades": [
+            {"highest_tp_hit": 1, "outcome": "tp1_hit"},
+            {"highest_tp_hit": 1, "outcome": "tp1_hit"},
+        ]
+    }
+    assert _objective_score(result, "profit_factor", params) == 999.0
+    assert _objective_score(result, "profit_factor_minus_dd", params) == 3.0

@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
 
@@ -91,6 +91,30 @@ class OptimizationRun(Base):
     completed_at = Column(DateTime, nullable=True)
     symbols_processed = Column(Integer, default=0)
     status = Column(String, default="running")
+
+
+class SimulationRun(Base):
+    __tablename__ = "simulation_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    status = Column(String, default="queued")
+    symbols = Column(Text, nullable=False)
+    timeframe = Column(String, nullable=False)
+    start_date = Column(DateTime, nullable=False)
+    end_date = Column(DateTime, nullable=False)
+    objective = Column(String, default="risk_adjusted")
+    n_trials = Column(Integer, default=50)
+    swept_params = Column(Text, default="[]")
+    locked_params = Column(Text, default="{}")
+    progress_current = Column(Integer, default=0)
+    progress_total = Column(Integer, default=0)
+    current_symbol = Column(String, nullable=True)
+    best_value = Column(Float, nullable=True)
+    results = Column(Text, default="{}")
+    error = Column(Text, nullable=True)
+    cancel_requested = Column(Boolean, default=False)
 
 
 class MarketRegime(Base):

@@ -131,7 +131,7 @@ SIMULATOR_OBJECTIVES: list[dict[str, str]] = [
     {"key": "tp2_rate", "label": "TP2 hit rate"},
     {"key": "tp3_rate", "label": "TP3 hit rate"},
     {"key": "tp4_rate", "label": "TP4 hit rate"},
-    {"key": "min_drawdown", "label": "Min drawdown (maximize -max DD in R)"},
+    {"key": "min_drawdown", "label": "Lowest max drawdown (maximize -max DD in R)"},
     {"key": "expectancy_minus_dd", "label": "Average R - 0.5 × max DD"},
     {"key": "profit_factor_minus_dd", "label": "Profit factor - 0.5 × max DD"},
 ]

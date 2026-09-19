@@ -50,8 +50,10 @@
   </div>
 
   <div style="margin-top:12px;">
-    <div style="margin-bottom:8px; color:#8b949e;">Selected symbols</div>
+    <div style="margin-bottom:8px; color:#8b949e;">Selected watchlist symbols</div>
     <div id="selected_symbols" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
+    <div style="margin:12px 0 8px; color:#8b949e;">Custom tickers preview</div>
+    <div id="custom_ticker_preview" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
   </div>
 
   <details class="card" style="padding:12px; margin: 12px 0;">
@@ -165,6 +167,13 @@
     return { swept, locked };
   }
 
+  function parsedExtraTickers() {
+    return $('extra_tickers').value
+      .split(',')
+      .map(value => value.trim().toUpperCase())
+      .filter(Boolean);
+  }
+
   function setFormErrors(errors) {
     $('formErrors').innerHTML = errors.length ? errors.map(err => `<div>${esc(err)}</div>`).join('') : '';
   }
@@ -179,6 +188,20 @@
     if (!symbols.length) {
       box.innerHTML = '<div style="color:#8b949e;">No symbols selected yet.</div>';
       return;
+    }
+
+    function renderCustomTickers() {
+      const box = $('custom_ticker_preview');
+      const extras = parsedExtraTickers();
+      if (!extras.length) {
+        box.innerHTML = '<div style="color:#8b949e;">No custom tickers added.</div>';
+        return;
+      }
+      box.innerHTML = extras.map(symbol => `
+        <span style="display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border:1px solid #30363d; border-radius:999px; background:#0d1117;">
+          <span>${esc(symbol)}</span>
+        </span>
+      `).join('');
     }
     box.innerHTML = symbols.map(symbol => `
       <span style="display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border:1px solid #30363d; border-radius:999px; background:#0d1117;">
@@ -238,7 +261,7 @@
     const timeframe = $('timeframe').value;
     const startDate = $('start_date').value;
     const endDate = $('end_date').value;
-    const hasSymbols = selectedSymbols().length > 0 || $('extra_tickers').value.trim().length > 0;
+    const hasSymbols = selectedSymbols().length > 0 || parsedExtraTickers().length > 0;
     if (!hasSymbols) errors.push('Select at least one symbol or enter custom tickers.');
     if (!validTimeframes.includes(timeframe)) errors.push('Choose a valid timeframe.');
     if (!startDate) errors.push('Start date is required.');
@@ -314,8 +337,13 @@
   renderAssetClasses();
   renderClassSymbols();
   renderSelectedSymbols();
+  renderCustomTickers();
   $('asset_class').addEventListener('change', renderClassSymbols);
   ['extra_tickers', 'timeframe', 'start_date', 'end_date', 'n_trials', 'min_trades'].forEach(id => {
+    if (id === 'extra_tickers') {
+      $(id).addEventListener('input', renderCustomTickers);
+      $(id).addEventListener('change', renderCustomTickers);
+    }
     $(id).addEventListener('input', refreshValidation);
     $(id).addEventListener('change', refreshValidation);
   });

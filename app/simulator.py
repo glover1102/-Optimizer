@@ -239,6 +239,7 @@ def run_simulation(sim_id: int) -> None:
     run.progress_current = 0
     run.progress_total = max(1, run_trials * max(1, len(symbols)))
     run.best_value = None
+    run.error = None
     run.results = json.dumps({})
     session.commit()
     session.close()
@@ -410,10 +411,11 @@ def run_simulation(sim_id: int) -> None:
                 else:
                     current.status = "completed"
                     current.progress_current = current.progress_total
-                    if all_results and not any(isinstance(payload, dict) and payload.get("best_params") for payload in all_results.values()):
-                        current.error = EMPTY_RESULT_MESSAGE
-                    elif not current.error:
-                        current.error = None
+                    current.error = (
+                        EMPTY_RESULT_MESSAGE
+                        if all_results and not any(isinstance(payload, dict) and payload.get("best_params") for payload in all_results.values())
+                        else None
+                    )
                 final_session.commit()
         finally:
             final_session.close()

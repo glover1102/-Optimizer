@@ -80,7 +80,7 @@
 
   <div id="statusBox" style="margin-top:12px; color:#8b949e;" role="status" aria-live="polite"></div>
   <div style="margin-top:8px; border:1px solid #30363d; border-radius:6px; overflow:hidden;">
-    <div id="progressBar" style="height:12px; width:0%; background:#58a6ff;"></div>
+    <div id="progressBar" role="progressbar" aria-label="Simulation progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" style="height:12px; width:0%; background:#58a6ff;"></div>
   </div>
 </div>
 
@@ -163,6 +163,7 @@
     const tot = run.progress_total || 1;
     const pct = Math.max(0, Math.min(100, Math.round((cur / Math.max(tot, 1)) * 100)));
     $('progressBar').style.width = `${pct}%`;
+    $('progressBar').setAttribute('aria-valuenow', String(pct));
     $('statusBox').textContent = `Status: ${run.status} | ${cur}/${tot} | Symbol: ${run.current_symbol || '-'} | Best: ${run.best_value ?? '-'}`;
     renderResults(run);
 
@@ -208,8 +209,14 @@
         msg = err.detail || msg;
       } catch (_) {}
       $('statusBox').textContent = `Start failed: ${msg}`;
+      simId = null;
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
       $('runBtn').disabled = false;
       $('cancelBtn').style.display = 'none';
+      $('applyBtn').style.display = 'none';
       return;
     }
     const out = await res.json();
@@ -230,19 +237,24 @@
 
   $('applyBtn').addEventListener('click', async () => {
     if (!simId) return;
-    const res = await fetch(`/api/simulate/${simId}/apply`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: $('passcode').value }),
-    });
-    const body = await res.text();
-    let parsed = {};
-    try { parsed = JSON.parse(body); } catch (_) {}
-    if (!res.ok) {
-      $('statusBox').textContent = `Apply failed: ${parsed.detail || body}`;
-      return;
+    $('applyBtn').disabled = true;
+    try {
+      const res = await fetch(`/api/simulate/${simId}/apply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: $('passcode').value }),
+      });
+      const body = await res.text();
+      let parsed = {};
+      try { parsed = JSON.parse(body); } catch (_) {}
+      if (!res.ok) {
+        $('statusBox').textContent = `Apply failed: ${parsed.detail || body}`;
+        return;
+      }
+      $('statusBox').textContent = `Applied results: ${((parsed.applied || []).length)}`;
+    } finally {
+      $('applyBtn').disabled = false;
     }
-    $('statusBox').textContent = `Applied results: ${((parsed.applied || []).length)}`;
   });
 })();
 </script>

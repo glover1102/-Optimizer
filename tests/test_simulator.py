@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 
@@ -11,6 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models import Base, OptimizationResult, SimulationRun
+from app.main import SimulateApplyRequest, api_simulate_apply
 from app.optimizer import compute_expectancy_r, compute_profit_factor, run_optimization
 from app.simulator import apply_simulation_results, run_simulation
 
@@ -176,3 +178,46 @@ def test_objective_helpers_and_min_trade_pruning():
     arr = np.array([100.0, 101.0, 102.0, 103.0, 102.5, 102.2])
     opt = run_optimization(arr + 1.0, arr - 1.0, arr, np.ones_like(arr), timeframe="1h", n_trials=2, min_trades=999)
     assert opt["n_trials_completed"] == 0
+
+
+def test_api_apply_transitions_status_and_is_idempotent(tmp_path, monkeypatch):
+    factory = _setup_db(tmp_path, monkeypatch)
+    monkeypatch.setattr("app.config.OPTIMIZE_PASSCODE", "ok")
+
+    session = factory()
+    run = SimulationRun(
+        status="completed",
+        symbols=json.dumps(["AAPL"]),
+        timeframe="1h",
+        start_date=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        end_date=datetime(2024, 1, 10, tzinfo=timezone.utc),
+        objective="risk_adjusted",
+        n_trials=1,
+        swept_params="[]",
+        locked_params="{}",
+        results=json.dumps(
+            {
+                "AAPL": {
+                    "best_params": {"sl_mult": 1.6, "tp1_rr": 1.0, "use_frsi": False},
+                    "in_sample": {"signals": 8, "win_rate": 0.5, "tp2_rate": 0.2, "sl_rate": 0.3},
+                    "walk_forward": {"score": 30.0, "consistency": 0.6},
+                }
+            }
+        ),
+    )
+    session.add(run)
+    session.commit()
+    run_id = run.id
+    session.close()
+
+    first = asyncio.run(api_simulate_apply(run_id, SimulateApplyRequest(code="ok")))
+    assert first["applied"] == [{"symbol": "AAPL", "timeframe": "1h"}]
+
+    session = factory()
+    refreshed = session.query(SimulationRun).filter(SimulationRun.id == run_id).first()
+    assert refreshed is not None
+    assert refreshed.status == "applied"
+    session.close()
+
+    second = asyncio.run(api_simulate_apply(run_id, SimulateApplyRequest(code="ok")))
+    assert second == {"applied": [], "status": "already_applied"}

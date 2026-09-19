@@ -305,6 +305,9 @@ def run_simulation(sim_id: int) -> None:
                 )
                 ran_optimization = True
                 if int(opt_result.get("n_trials_completed", 0)) == 0:
+                    if _cancel_requested():
+                        cancelled_early = True
+                        break
                     all_results[symbol] = {"error": f"No completed trials (all pruned; min_trades={min_trades})"}
                     continue
                 best_params = opt_result["best_params"]
@@ -437,6 +440,7 @@ def apply_simulation_results(sim_id: int) -> dict[str, Any]:
                 if existing_row is None:
                     current_row = OptimizationResult(symbol=symbol, timeframe=run.timeframe)
                     session.add(current_row)
+                    session.flush()
                 else:
                     current_row = existing_row
                 session.execute(

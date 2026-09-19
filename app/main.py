@@ -685,20 +685,70 @@ async def api_simulate_apply(sim_id: int, req: SimulateApplyRequest):
         from app.database import get_session_factory
         from app.models import SimulationRun
         from app.simulator import apply_simulation_results
+        from sqlalchemy import update
 
         if not is_db_available():
             raise HTTPException(status_code=503, detail="Database unavailable")
         factory = get_session_factory()
         session = factory()
+        lock_acquired = False
         try:
             run = session.query(SimulationRun).filter(SimulationRun.id == sim_id).first()
             if run is None:
                 raise HTTPException(status_code=404, detail="Simulation not found")
+            if run.status in {"applied", "applying"}:
+                return {"applied": [], "status": "already_applied"}
             if run.status != "completed":
                 raise HTTPException(status_code=409, detail="Simulation run must be completed before apply")
+
+            updated = (
+                session.query(SimulationRun)
+                .filter(
+                    SimulationRun.id == sim_id,
+                    SimulationRun.status == "completed",
+                )
+                .update({SimulationRun.status: "applying"}, synchronize_session=False)
+            )
+            if updated == 0:
+                raise HTTPException(status_code=409, detail="Simulation run must be completed before apply")
+            session.commit()
+            lock_acquired = True
         finally:
             session.close()
-        return apply_simulation_results(sim_id)
+        try:
+            result = apply_simulation_results(sim_id)
+        except Exception:
+            if lock_acquired:
+                rollback_session = factory()
+                try:
+                    rollback_session.execute(
+                        update(SimulationRun)
+                        .where(
+                            SimulationRun.id == sim_id,
+                            SimulationRun.status == "applying",
+                        )
+                        .values(status="completed")
+                    )
+                    rollback_session.commit()
+                finally:
+                    rollback_session.close()
+            raise
+
+        if lock_acquired:
+            finalize_session = factory()
+            try:
+                finalize_session.execute(
+                    update(SimulationRun)
+                    .where(
+                        SimulationRun.id == sim_id,
+                        SimulationRun.status == "applying",
+                    )
+                    .values(status="applied")
+                )
+                finalize_session.commit()
+            finally:
+                finalize_session.close()
+        return result
     except HTTPException:
         raise
     except Exception as exc:

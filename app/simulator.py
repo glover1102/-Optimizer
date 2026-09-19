@@ -15,6 +15,11 @@ from app.optimizer import run_optimization
 from app.walk_forward import run_walk_forward
 
 logger = logging.getLogger(__name__)
+EMPTY_RESULT_MESSAGE = (
+    "No completed trials — the strategy produced too few trades in this window. "
+    "Try a longer date range, a lower timeframe, or reduce Min trades."
+)
+_MIN_TRADES_BAR_DIVISOR = 25
 
 _FILTER_TOGGLES = [
     "use_structure_15m",
@@ -91,6 +96,18 @@ SIM_SWEEP_GENES: list[dict[str, Any]] = [
     {"key": "fatr_allow", "label": "ATR allow mode", "type": "categorical", "choices": ["Only Stable", "Stable or Low", "Stable or High"], "when": "use_fatr"},
 ]
 
+
+def _derive_auto_filter_genes() -> set[str]:
+    auto_genes = {"filt_mode", *_FILTER_TOGGLES}
+    for gene in SIM_SWEEP_GENES:
+        parent = gene.get("when")
+        if gene["key"] in _FILTER_TOGGLES or parent in _FILTER_TOGGLES or gene["key"] == "filt_mode":
+            auto_genes.add(gene["key"])
+    return auto_genes
+
+
+AUTO_FILTER_GENES = _derive_auto_filter_genes()
+
 def _json_load(v: str | None, default: Any):
     if not v:
         return default
@@ -163,6 +180,12 @@ def _split_sample(df, split_ratio: float = 0.7):
     return df.iloc[:split], df.iloc[split:]
 
 
+def _effective_min_trades(user_min_trades: int, bars_in_window: int) -> int:
+    requested = max(1, int(user_min_trades))
+    max_reasonable = max(1, int(bars_in_window) // _MIN_TRADES_BAR_DIVISOR)
+    return max(1, min(requested, max_reasonable))
+
+
 def _serialize_symbol_result(best_params: dict[str, Any], opt_result: dict[str, Any], in_sample: dict[str, Any], out_sample: dict[str, Any], wf_result: dict[str, Any]) -> dict[str, Any]:
     return {
         "best_value": _safe_round(opt_result.get("best_value")),
@@ -206,14 +229,17 @@ def run_simulation(sim_id: int) -> None:
     run_start = run.start_date
     run_end = run.end_date
     run_objective = run.objective
+    auto_mode = bool(getattr(run, "auto_mode", False))
     run_trials = int(run.n_trials)
-    min_trades = int(locked_params.get("min_trades", 20))
+    stored_min_trades = getattr(run, "min_trades", None)
+    min_trades = int(stored_min_trades if stored_min_trades is not None else locked_params.get("min_trades", 10))
     locked_params = {k: v for k, v in locked_params.items() if k != "min_trades"}
 
     run.status = "running"
     run.progress_current = 0
     run.progress_total = max(1, run_trials * max(1, len(symbols)))
     run.best_value = None
+    run.error = None
     run.results = json.dumps({})
     session.commit()
     session.close()
@@ -254,6 +280,8 @@ def run_simulation(sim_id: int) -> None:
             local.close()
 
     try:
+        if auto_mode:
+            swept_params.update(AUTO_FILTER_GENES)
         base_params = _build_base_params(locked_params)
         suggest_fn = _build_suggest_fn(base_params, swept_params, locked_params)
         cancelled_early = False
@@ -281,6 +309,7 @@ def run_simulation(sim_id: int) -> None:
                     continue
 
                 ins_df, oos_df = _split_sample(df)
+                effective_min_trades = _effective_min_trades(min_trades, len(ins_df))
                 ins_open = ins_df["open"].to_numpy(dtype=float)
                 ins_high = ins_df["high"].to_numpy(dtype=float)
                 ins_low = ins_df["low"].to_numpy(dtype=float)
@@ -297,7 +326,7 @@ def run_simulation(sim_id: int) -> None:
                     timeframe=run_timeframe,
                     n_trials=run_trials,
                     objective=run_objective,
-                    min_trades=min_trades,
+                    min_trades=effective_min_trades,
                     suggest_params_fn=suggest_fn,
                     base_params=base_params,
                     trial_complete_callback=_on_trial_complete,
@@ -308,7 +337,12 @@ def run_simulation(sim_id: int) -> None:
                     if _cancel_requested():
                         cancelled_early = True
                         break
-                    all_results[symbol] = {"error": f"No completed trials (all pruned; min_trades={min_trades})"}
+                    all_results[symbol] = {
+                        "empty_result": True,
+                        "message": EMPTY_RESULT_MESSAGE,
+                        "effective_min_trades": effective_min_trades,
+                        "requested_min_trades": min_trades,
+                    }
                     continue
                 best_params = opt_result["best_params"]
                 in_sample = opt_result["best_backtest"]
@@ -377,6 +411,11 @@ def run_simulation(sim_id: int) -> None:
                 else:
                     current.status = "completed"
                     current.progress_current = current.progress_total
+                    current.error = (
+                        EMPTY_RESULT_MESSAGE
+                        if all_results and not any(isinstance(payload, dict) and payload.get("best_params") for payload in all_results.values())
+                        else None
+                    )
                 final_session.commit()
         finally:
             final_session.close()

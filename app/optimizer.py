@@ -13,6 +13,7 @@ from app.config import DEFAULT_SIGNAL_PARAMS, DEFAULT_TRIALS, PARAM_RANGES
 
 logger = logging.getLogger(__name__)
 optuna.logging.set_verbosity(optuna.logging.WARNING)
+_DD_BLEND_WEIGHT = 0.5
 
 
 def _trade_r_multiple(trade: dict[str, Any], params: dict[str, Any]) -> float:
@@ -36,6 +37,25 @@ def compute_expectancy_r(result: dict[str, Any], params: dict[str, Any]) -> floa
     return float(np.mean(values)) if values else 0.0
 
 
+def compute_total_r(result: dict[str, Any], params: dict[str, Any]) -> float:
+    trades = list(result.get("trades") or [])
+    if not trades:
+        return 0.0
+    values = [_trade_r_multiple(t, params) for t in trades]
+    return float(np.sum(values)) if values else 0.0
+
+
+def compute_sharpe_r(result: dict[str, Any], params: dict[str, Any]) -> float:
+    trades = list(result.get("trades") or [])
+    if len(trades) < 2:
+        return 0.0
+    values = np.asarray([_trade_r_multiple(t, params) for t in trades], dtype=float)
+    std = float(np.std(values))
+    if std <= 1e-9:
+        return 0.0
+    return float(np.mean(values) / std)
+
+
 def compute_profit_factor(result: dict[str, Any], params: dict[str, Any]) -> float:
     trades = list(result.get("trades") or [])
     if not trades:
@@ -46,6 +66,23 @@ def compute_profit_factor(result: dict[str, Any], params: dict[str, Any]) -> flo
     if gross_loss <= 0:
         return float("inf") if gross_profit > 0 else 0.0
     return float(gross_profit / gross_loss)
+
+
+def compute_max_drawdown_r(result: dict[str, Any], params: dict[str, Any]) -> float:
+    trades = list(result.get("trades") or [])
+    if not trades:
+        return 0.0
+    values = np.asarray([_trade_r_multiple(t, params) for t in trades], dtype=float)
+    equity_curve = np.concatenate(([0.0], np.cumsum(values)))
+    running_peak = np.maximum.accumulate(equity_curve)
+    return float(np.max(running_peak - equity_curve))
+
+
+def _blended_profit_factor_value(result: dict[str, Any], params: dict[str, Any]) -> float:
+    profit_factor = compute_profit_factor(result, params)
+    if np.isinf(profit_factor):
+        return float(min(10.0, 1.0 + max(0.0, compute_total_r(result, params))))
+    return float(profit_factor)
 
 
 def _suggest_params(trial: optuna.Trial) -> dict[str, Any]:
@@ -85,11 +122,29 @@ def _suggest_params(trial: optuna.Trial) -> dict[str, Any]:
 def _objective_score(result: dict[str, Any], objective: str, params: dict[str, Any]) -> float:
     if objective == "win_rate":
         return float(result["win_rate"])
+    if objective == "tp1_rate":
+        return float(result["tp1_rate"])
     if objective == "tp2_rate":
         return float(result["tp2_rate"])
+    if objective == "tp3_rate":
+        return float(result["tp3_rate"])
+    if objective == "tp4_rate":
+        return float(result["tp4_rate"])
+    if objective in {"avg_r", "risk_adjusted"}:
+        return compute_expectancy_r(result, params)
+    if objective == "total_r":
+        return compute_total_r(result, params)
+    if objective == "sharpe":
+        return compute_sharpe_r(result, params)
     if objective == "profit_factor":
         val = compute_profit_factor(result, params)
         return 999.0 if np.isinf(val) else float(val)
+    if objective == "min_drawdown":
+        return -compute_max_drawdown_r(result, params)
+    if objective == "expectancy_minus_dd":
+        return compute_expectancy_r(result, params) - (_DD_BLEND_WEIGHT * compute_max_drawdown_r(result, params))
+    if objective == "profit_factor_minus_dd":
+        return _blended_profit_factor_value(result, params) - (_DD_BLEND_WEIGHT * compute_max_drawdown_r(result, params))
     return compute_expectancy_r(result, params)
 
 

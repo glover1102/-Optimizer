@@ -120,6 +120,22 @@ WATCHLIST: dict[str, list[str]] = {
 
 TIMEFRAMES: list[str] = ["5m", "15m", "1h", "4h", "1d"]
 
+SIMULATOR_OBJECTIVES: list[dict[str, str]] = [
+    {"key": "win_rate", "label": "Win rate"},
+    {"key": "avg_r", "label": "Average R (expectancy)"},
+    {"key": "risk_adjusted", "label": "Average R (legacy alias)"},
+    {"key": "total_r", "label": "Total R"},
+    {"key": "sharpe", "label": "Sharpe (R mean / std)"},
+    {"key": "profit_factor", "label": "Profit factor"},
+    {"key": "tp1_rate", "label": "TP1 hit rate"},
+    {"key": "tp2_rate", "label": "TP2 hit rate"},
+    {"key": "tp3_rate", "label": "TP3 hit rate"},
+    {"key": "tp4_rate", "label": "TP4 hit rate"},
+    {"key": "min_drawdown", "label": "Lowest max drawdown (maximize -max DD in R)"},
+    {"key": "expectancy_minus_dd", "label": "Average R - 0.5 × max DD"},
+    {"key": "profit_factor_minus_dd", "label": "Profit factor - 0.5 × max DD"},
+]
+
 PARAM_RANGES: dict = {
     "atr_length": (7, 28),
     "sl_mult": (1.0, 2.5),

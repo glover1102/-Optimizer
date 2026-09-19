@@ -8,13 +8,13 @@ from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 
 from app.models import Base, OptimizationResult, SimulationRun
 from app.main import SimulateApplyRequest, api_simulate_apply
 from app.optimizer import compute_expectancy_r, compute_profit_factor, run_optimization
-from app.simulator import apply_simulation_results, run_simulation
+from app.simulator import AUTO_FILTER_GENES, EMPTY_RESULT_MESSAGE, apply_simulation_results, run_simulation
 
 
 def _synthetic_df(n: int = 240) -> pd.DataFrame:
@@ -62,6 +62,7 @@ def test_simulation_completes_and_stores_results(tmp_path, monkeypatch):
         end_date=datetime(2024, 1, 20, tzinfo=timezone.utc),
         objective="risk_adjusted",
         n_trials=2,
+        min_trades=1,
         swept_params=json.dumps(["sl_mult", "use_frsi", "rsi_length"]),
         locked_params=json.dumps({"min_trades": 1}),
         progress_total=6,
@@ -103,6 +104,7 @@ def test_simulation_cancelled_when_requested(tmp_path, monkeypatch):
         end_date=datetime(2024, 1, 10, tzinfo=timezone.utc),
         objective="risk_adjusted",
         n_trials=2,
+        min_trades=1,
         swept_params=json.dumps(["sl_mult"]),
         locked_params=json.dumps({"min_trades": 1}),
         cancel_requested=True,
@@ -134,6 +136,7 @@ def test_apply_simulation_results_creates_current_rows(tmp_path, monkeypatch):
         end_date=datetime(2024, 1, 10, tzinfo=timezone.utc),
         objective="risk_adjusted",
         n_trials=1,
+        min_trades=10,
         swept_params="[]",
         locked_params="{}",
         results=json.dumps(
@@ -193,6 +196,7 @@ def test_api_apply_transitions_status_and_is_idempotent(tmp_path, monkeypatch):
         end_date=datetime(2024, 1, 10, tzinfo=timezone.utc),
         objective="risk_adjusted",
         n_trials=1,
+        min_trades=10,
         swept_params="[]",
         locked_params="{}",
         results=json.dumps(
@@ -221,3 +225,139 @@ def test_api_apply_transitions_status_and_is_idempotent(tmp_path, monkeypatch):
 
     second = asyncio.run(api_simulate_apply(run_id, SimulateApplyRequest(code="ok")))
     assert second == {"applied": [], "status": "already_applied"}
+
+
+def test_auto_mode_expands_filter_sweeps(tmp_path, monkeypatch):
+    factory = _setup_db(tmp_path, monkeypatch)
+    captured = {}
+
+    monkeypatch.setattr("app.simulator.fetch_ohlcv_range", lambda *args, **kwargs: None)
+
+    def _capture_build(base_params, swept_params, locked_params):
+        captured["swept_params"] = set(swept_params)
+        return lambda trial: {}
+
+    monkeypatch.setattr("app.simulator._build_suggest_fn", _capture_build)
+
+    session = factory()
+    run = SimulationRun(
+        status="queued",
+        symbols=json.dumps(["AAPL"]),
+        timeframe="1h",
+        start_date=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        end_date=datetime(2024, 1, 10, tzinfo=timezone.utc),
+        objective="avg_r",
+        auto_mode=True,
+        n_trials=2,
+        min_trades=10,
+        swept_params=json.dumps(["sl_mult"]),
+        locked_params=json.dumps({"min_trades": 10}),
+        results=json.dumps({}),
+    )
+    session.add(run)
+    session.commit()
+    run_id = run.id
+    session.close()
+
+    run_simulation(run_id)
+
+    assert "sl_mult" in captured["swept_params"]
+    assert AUTO_FILTER_GENES.issubset(captured["swept_params"])
+
+
+def test_simulation_clamps_min_trades_and_stores_empty_result_hint(tmp_path, monkeypatch):
+    factory = _setup_db(tmp_path, monkeypatch)
+    captured = {}
+    monkeypatch.setattr("app.simulator.fetch_ohlcv_range", lambda *args, **kwargs: _synthetic_df(40))
+
+    def _fake_run_optimization(*args, **kwargs):
+        captured["min_trades"] = kwargs["min_trades"]
+        return {
+            "best_params": {"sl_mult": 1.5},
+            "best_value": 0.0,
+            "best_backtest": {"total_signals": 0},
+            "top_trials": [],
+            "n_trials_completed": 0,
+        }
+
+    monkeypatch.setattr("app.simulator.run_optimization", _fake_run_optimization)
+
+    session = factory()
+    run = SimulationRun(
+        status="queued",
+        symbols=json.dumps(["AAPL"]),
+        timeframe="1h",
+        start_date=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        end_date=datetime(2024, 1, 5, tzinfo=timezone.utc),
+        objective="avg_r",
+        n_trials=2,
+        min_trades=999,
+        swept_params=json.dumps(["sl_mult"]),
+        locked_params=json.dumps({"min_trades": 999}),
+        results=json.dumps({}),
+    )
+    session.add(run)
+    session.commit()
+    run_id = run.id
+    session.close()
+
+    run_simulation(run_id)
+
+    assert captured["min_trades"] == 1
+
+    session = factory()
+    saved = session.query(SimulationRun).filter(SimulationRun.id == run_id).first()
+    assert saved is not None
+    assert saved.status == "completed"
+    assert saved.error == EMPTY_RESULT_MESSAGE
+
+    results = json.loads(saved.results)
+    assert results["AAPL"]["empty_result"] is True
+    assert results["AAPL"]["message"] == EMPTY_RESULT_MESSAGE
+    assert results["AAPL"]["requested_min_trades"] == 999
+    assert results["AAPL"]["effective_min_trades"] == 1
+    session.close()
+
+
+def test_run_migrations_adds_simulation_auto_mode_column(tmp_path):
+    from app.database import run_migrations
+
+    db_path = tmp_path / "migration_test.db"
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE simulation_runs (
+                    id INTEGER PRIMARY KEY,
+                    created_at DATETIME,
+                    updated_at DATETIME,
+                    status VARCHAR,
+                    symbols TEXT NOT NULL,
+                    timeframe VARCHAR NOT NULL,
+                    start_date DATETIME NOT NULL,
+                    end_date DATETIME NOT NULL,
+                    objective VARCHAR,
+                    n_trials INTEGER,
+                    swept_params TEXT,
+                    locked_params TEXT,
+                    progress_current INTEGER,
+                    progress_total INTEGER,
+                    current_symbol VARCHAR,
+                    best_value FLOAT,
+                    results TEXT,
+                    error TEXT,
+                    cancel_requested BOOLEAN
+                )
+                """
+            )
+        )
+
+    result = run_migrations(engine)
+    cols = {col["name"] for col in inspect(engine).get_columns("simulation_runs")}
+
+    assert "simulation_runs.auto_mode" in result["added"]
+    assert "simulation_runs.min_trades" in result["added"]
+    assert "auto_mode" in cols
+    assert "min_trades" in cols
